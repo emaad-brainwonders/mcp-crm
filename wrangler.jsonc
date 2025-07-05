@@ -38,7 +38,7 @@
     "port": 8788
   },
   "vars": {
-    "WORKOS_CLIENT_ID": "client_01JYK402FD2XQ392316BY5RP1Q"
+    "WORKOS_CLIENT_ID": "client_01JYK402FD2XQ392316BY5RP1Q",
     "GOOGLE_SHEET_ID": "1srjJFaMgoNcZbadGpe9ipMz5gqzFfO8kCiPsfYYmHC0"
   },
   "secrets": [
