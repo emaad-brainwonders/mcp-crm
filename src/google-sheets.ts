@@ -9,7 +9,6 @@ export class GoogleSheetsService {
 
     async appendRow(values: string[]): Promise<void> {
         const url = `https://sheets.googleapis.com/v4/spreadsheets/${this.sheetId}/values/Sheet1:append?valueInputOption=USER_ENTERED`;
-        
         const response = await fetch(url, {
             method: 'POST',
             headers: {
@@ -20,9 +19,10 @@ export class GoogleSheetsService {
                 values: [values]
             })
         });
-
         if (!response.ok) {
             const error = await response.text();
+            // Log error details for debugging
+            console.error('GoogleSheetsService.appendRow failed:', response.status, error);
             throw new Error(`Failed to append to Google Sheet: ${error}`);
         }
     }
@@ -85,6 +85,8 @@ export class GoogleSheetsService {
         });
         if (!response.ok) {
             const error = await response.text();
+            // Log error details for debugging
+            console.error('GoogleSheetsService.updateRow failed:', response.status, error);
             throw new Error(`Failed to update Google Sheet: ${error}`);
         }
     }
