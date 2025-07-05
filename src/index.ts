@@ -6,7 +6,13 @@ import { AuthkitHandler } from "./authkit-handler";
 import type { Props } from "./props";
 import { GoogleSheetsService } from "./google-sheets";
 
-export class MyMCP extends McpAgent<Env, unknown, Props> {
+// Extended Env interface to include Google Sheets variables
+interface ExtendedEnv extends Env {
+    GOOGLE_ACCESS_TOKEN: string;
+    GOOGLE_SHEET_ID: string;
+}
+
+export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
     server = new McpServer({
         name: "MCP server demo using AuthKit",
         version: "1.0.0",
@@ -19,7 +25,31 @@ export class MyMCP extends McpAgent<Env, unknown, Props> {
     }> = [];
 
     async init() {
+        // Hello, world!
+        this.server.tool(
+            "add",
+            "Add two numbers the way only MCP can",
+            { a: z.number(), b: z.number() },
+            async ({ a, b }) => {
+                const result = String(a + b);
+                
+                // Track this interaction
+                this.chatHistory.push({
+                    role: 'user',
+                    content: `add(${a}, ${b})`,
+                    timestamp: new Date()
+                });
+                this.chatHistory.push({
+                    role: 'assistant', 
+                    content: result,
+                    timestamp: new Date()
+                });
 
+                return {
+                    content: [{ type: "text", text: result }],
+                };
+            }
+        );
 
         // Contact saving tool
         this.server.tool(
@@ -31,7 +61,7 @@ export class MyMCP extends McpAgent<Env, unknown, Props> {
             },
             async ({ contactNumber, message }) => {
                 try {
-                    const env = this.env as Env;
+                    const env = this.env as ExtendedEnv;
                     const googleSheets = new GoogleSheetsService(
                         env.GOOGLE_ACCESS_TOKEN,
                         env.GOOGLE_SHEET_ID
@@ -95,7 +125,7 @@ export class MyMCP extends McpAgent<Env, unknown, Props> {
             },
             async ({ summary }) => {
                 try {
-                    const env = this.env as Env;
+                    const env = this.env as ExtendedEnv;
                     const googleSheets = new GoogleSheetsService(
                         env.GOOGLE_ACCESS_TOKEN,
                         env.GOOGLE_SHEET_ID
@@ -158,7 +188,7 @@ export class MyMCP extends McpAgent<Env, unknown, Props> {
                         ),
                 },
                 async ({ prompt, steps }) => {
-                    const env = this.env as Env;
+                    const env = this.env as ExtendedEnv;
 
                     const response = await env.AI.run(
                         "@cf/black-forest-labs/flux-1-schnell",
