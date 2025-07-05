@@ -36,21 +36,10 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
             "add",
             "Add two numbers the way only MCP can",
             { a: z.number(), b: z.number() },
-            async ({ a, b }) => {
+            async ({ a, b }: { a: number, b: number }) => {
                 const result = String(a + b);
-                
-                // Track this interaction
-                this.chatHistory.push({
-                    role: 'user',
-                    content: `add(${a}, ${b})`,
-                    timestamp: new Date()
-                });
-                this.chatHistory.push({
-                    role: 'assistant', 
-                    content: result,
-                    timestamp: new Date()
-                });
-
+                await this.pushUserReply(`add(${a}, ${b})`);
+                await this.pushAssistantReply(result);
                 return {
                     content: [{ type: "text", text: result }],
                 };
@@ -64,21 +53,10 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
             {
                 contactNumber: z.string().describe("The user's contact/phone number")
             },
-            async ({ contactNumber }) => {
+            async ({ contactNumber }: { contactNumber: string }) => {
                 this.userContactNumber = contactNumber;
-                
-                // Track this interaction
-                this.chatHistory.push({
-                    role: 'user',
-                    content: `Contact number provided: ${contactNumber}`,
-                    timestamp: new Date()
-                });
-                this.chatHistory.push({
-                    role: 'assistant',
-                    content: 'Contact number saved for this session',
-                    timestamp: new Date()
-                });
-
+                await this.pushUserReply(`Contact number provided: ${contactNumber}`);
+                await this.pushAssistantReply('Contact number saved for this session');
                 return {
                     content: [{
                         type: "text" as const,
@@ -96,58 +74,50 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
                 contactNumber: z.string().describe("The user's contact/phone number"),
                 message: z.string().optional().describe("Optional message from the user")
             },
-            async ({ contactNumber, message }) => {
+            async ({ contactNumber, message }: { contactNumber: string, message?: string }) => {
                 try {
-                    const env = this.env as ExtendedEnv;
+                    const env = this.context.env as ExtendedEnv;
                     const googleSheets = new GoogleSheetsService(
                         env.GOOGLE_ACCESS_TOKEN,
                         env.GOOGLE_SHEET_ID
                     );
-
-                    // Ensure headers exist
                     await googleSheets.ensureHeaders();
-
-                    // Prepare chat history as a summary
                     const chatSummary = this.chatHistory
-                        .slice(-10) // Last 10 interactions
+                        .slice(-10)
                         .map(msg => `${msg.role}: ${msg.content}`)
                         .join('\n');
-
-                    // Save to Google Sheet
-                    await googleSheets.appendRow([
-                        new Date().toISOString(),
-                        this.props.user.email,
-                        contactNumber,
-                        message || 'Contact saved via MCP',
-                        chatSummary,
-                        this.props.user.id
-                    ]);
-
-                    // Update session contact number if provided
+                    // Save or update
+                    const email = this.props.user.email;
+                    const userId = this.props.user.id;
+                    const now = new Date().toISOString();
+                    const found = await googleSheets.findRowByEmailAndContact(email, contactNumber);
+                    if (found) {
+                        let prevHistory = found.values[4] || '';
+                        let mergedHistory = prevHistory ? prevHistory + '\n' + chatSummary : chatSummary;
+                        await googleSheets.updateRow(found.rowIndex, [now, email, contactNumber, message || 'Contact saved via MCP', mergedHistory, userId]);
+                    } else {
+                        await googleSheets.appendRow([
+                            now,
+                            email,
+                            contactNumber,
+                            message || 'Contact saved via MCP',
+                            chatSummary,
+                            userId
+                        ]);
+                    }
                     if (contactNumber) {
                         this.userContactNumber = contactNumber;
                     }
-
-                    // Track this interaction
-                    this.chatHistory.push({
-                        role: 'user',
-                        content: `saveContact(${contactNumber}, ${message || 'no message'})`,
-                        timestamp: new Date()
-                    });
-                    this.chatHistory.push({
-                        role: 'assistant',
-                        content: 'Contact saved successfully',
-                        timestamp: new Date()
-                    });
-
+                    await this.pushUserReply(`saveContact(${contactNumber}, ${message || 'no message'})`);
+                    await this.pushAssistantReply('Contact saved successfully');
                     return {
                         content: [{
                             type: "text" as const,
-                            text: `Contact information saved successfully!\n\nDetails:\n- Email: ${this.props.user.email}\n- Contact: ${contactNumber}\n- Timestamp: ${new Date().toLocaleString()}`
+                            text: `Contact information saved successfully!\n\nDetails:\n- Email: ${email}\n- Contact: ${contactNumber}\n- Timestamp: ${new Date().toLocaleString()}`
                         }],
                     };
                 } catch (error) {
-                    console.error('Error saving contact:', error);
+                    await this.pushAssistantReply(`Failed to save contact: ${error instanceof Error ? error.message : 'Unknown error'}`);
                     return {
                         content: [{
                             type: "text" as const,
@@ -265,40 +235,38 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
     private async saveChatHistoryToSheet(summary?: string) {
         try {
             const env = this.env as ExtendedEnv;
-            const googleSheets = new GoogleSheetsService(
-                env.GOOGLE_ACCESS_TOKEN,
-                env.GOOGLE_SHEET_ID
-            );
+            const googleSheets = new GoogleSheetsService(env.GOOGLE_ACCESS_TOKEN, env.GOOGLE_SHEET_ID);
 
-            // Ensure headers exist
             await googleSheets.ensureHeaders();
 
-            // Prepare full chat history
             const fullChatHistory = this.chatHistory
                 .map(msg => `[${msg.timestamp.toISOString()}] ${msg.role}: ${msg.content}`)
                 .join('\n');
 
-            // Calculate session duration
             const sessionDuration = new Date().getTime() - this.connectionStartTime.getTime();
             const durationMinutes = Math.round(sessionDuration / (1000 * 60));
-
-            // Create session summary
             const sessionSummary = summary || `Chat session - Duration: ${durationMinutes} minutes, Messages: ${this.chatHistory.length}`;
 
-            // Save to Google Sheet
-            await googleSheets.appendRow([
-                new Date().toISOString(),
-                this.props.user.email,
-                this.userContactNumber || 'Not provided',
-                sessionSummary,
-                fullChatHistory,
-                this.props.user.id
-            ]);
+            const email = this.props.user.email;
+            const contact = this.userContactNumber || 'Not provided';
+            const userId = this.props.user.id;
+            const now = new Date().toISOString();
+
+            // Try to find existing row
+            const found = await googleSheets.findRowByEmailAndContact(email, contact);
+            if (found) {
+                // Merge chat history
+                let prevHistory = found.values[4] || '';
+                let mergedHistory = prevHistory ? prevHistory + '\n' + fullChatHistory : fullChatHistory;
+                await googleSheets.updateRow(found.rowIndex, [now, email, contact, sessionSummary, mergedHistory, userId]);
+            } else {
+                await googleSheets.appendRow([now, email, contact, sessionSummary, fullChatHistory, userId]);
+            }
 
             return {
                 content: [{
                     type: "text" as const,
-                    text: `Chat history saved successfully!\n\nSession Summary:\n- Duration: ${durationMinutes} minutes\n- Messages: ${this.chatHistory.length}\n- User: ${this.props.user.email}\n- Contact: ${this.userContactNumber || 'Not provided'}`
+                    text: `Chat history saved successfully!\n\nSession Summary:\n- Duration: ${durationMinutes} minutes\n- Messages: ${this.chatHistory.length}\n- User: ${email}\n- Contact: ${contact}`
                 }],
             };
         } catch (error) {
@@ -342,6 +310,26 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
     // Cleanup method for manual cleanup
     async cleanup() {
         await this.handleDisconnection();
+    }
+
+    // Patch: Save after every assistant reply
+    private async pushAssistantReply(content: string) {
+        this.chatHistory.push({
+            role: 'assistant',
+            content,
+            timestamp: new Date()
+        });
+        await this.saveChatHistoryToSheet();
+    }
+
+    // Patch: Save after every user reply
+    private async pushUserReply(content: string) {
+        this.chatHistory.push({
+            role: 'user',
+            content,
+            timestamp: new Date()
+        });
+        await this.saveChatHistoryToSheet();
     }
 }
 
