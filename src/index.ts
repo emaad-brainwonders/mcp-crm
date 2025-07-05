@@ -322,7 +322,7 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
             content,
             timestamp: new Date()
         });
-        // Do not save here, only save after both user and assistant have replied
+        await this.saveNewChatLinesToSheet();
     }
 
     private async pushUserReply(content: string) {
@@ -331,15 +331,7 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
             content,
             timestamp: new Date()
         });
-        // Save after both user and assistant have replied (i.e., after a full exchange)
-        // If the last two messages are user then assistant, save both
-        if (this.chatHistory.length >= 2) {
-            const last = this.chatHistory[this.chatHistory.length - 1];
-            const prev = this.chatHistory[this.chatHistory.length - 2];
-            if (prev.role === 'user' && last.role === 'assistant') {
-                await this.saveNewChatLinesToSheet();
-            }
-        }
+        await this.saveNewChatLinesToSheet();
     }
 
     /**
