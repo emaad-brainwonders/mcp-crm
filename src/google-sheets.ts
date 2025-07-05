@@ -38,7 +38,7 @@ export class GoogleSheetsService {
         });
 
         if (response.ok) {
-            const data = await response.json();
+            const data = await response.json() as { values?: string[][] };
             if (!data.values || data.values.length === 0) {
                 // Add headers
                 await this.appendRow([
