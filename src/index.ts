@@ -81,7 +81,7 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
 
                 return {
                     content: [{
-                        type: "text",
+                        type: "text" as const,
                         text: `Thank you! Your contact number ${contactNumber} has been saved for this session. How can I help you today?`
                     }],
                 };
@@ -142,7 +142,7 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
 
                     return {
                         content: [{
-                            type: "text",
+                            type: "text" as const,
                             text: `Contact information saved successfully!\n\nDetails:\n- Email: ${this.props.user.email}\n- Contact: ${contactNumber}\n- Timestamp: ${new Date().toLocaleString()}`
                         }],
                     };
@@ -150,7 +150,7 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
                     console.error('Error saving contact:', error);
                     return {
                         content: [{
-                            type: "text",
+                            type: "text" as const,
                             text: `Failed to save contact: ${error instanceof Error ? error.message : 'Unknown error'}`
                         }],
                     };
@@ -274,7 +274,7 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
 
             return {
                 content: [{
-                    type: "text",
+                    type: "text" as const,
                     text: `Chat history saved successfully!\n\nSession Summary:\n- Duration: ${durationMinutes} minutes\n- Messages: ${this.chatHistory.length}\n- User: ${this.props.user.email}\n- Contact: ${this.userContactNumber || 'Not provided'}`
                 }],
             };
@@ -282,7 +282,7 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
             console.error('Error saving chat history:', error);
             return {
                 content: [{
-                    type: "text",
+                    type: "text" as const,
                     text: `Failed to save chat history: ${error instanceof Error ? error.message : 'Unknown error'}`
                 }],
             };
@@ -290,21 +290,20 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
     }
 
     private setupDisconnectionHandler() {
-        // Handle process termination
-        process.on('SIGINT', this.handleDisconnection.bind(this));
-        process.on('SIGTERM', this.handleDisconnection.bind(this));
+        // For Cloudflare Workers, we need to handle cleanup differently
+        // Use addEventListener for 'beforeunload' or similar events
+        if (typeof addEventListener !== 'undefined') {
+            addEventListener('beforeunload', () => {
+                this.handleDisconnection();
+            });
+        }
         
-        // Handle uncaught exceptions
-        process.on('uncaughtException', (error) => {
-            console.error('Uncaught exception:', error);
-            this.handleDisconnection();
-        });
-
-        // Handle unhandled promise rejections
-        process.on('unhandledRejection', (reason, promise) => {
-            console.error('Unhandled rejection at:', promise, 'reason:', reason);
-            this.handleDisconnection();
-        });
+        // Alternative: Use a cleanup registry if available
+        if (typeof globalThis !== 'undefined' && globalThis.addEventListener) {
+            globalThis.addEventListener('beforeunload', () => {
+                this.handleDisconnection();
+            });
+        }
     }
 
     private async handleDisconnection() {
@@ -321,13 +320,9 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
         }
     }
 
-    // Override the cleanup method if it exists in the parent class
+    // Cleanup method for manual cleanup
     async cleanup() {
         await this.handleDisconnection();
-        // Call parent cleanup if it exists
-        if (super.cleanup) {
-            await super.cleanup();
-        }
     }
 }
 
