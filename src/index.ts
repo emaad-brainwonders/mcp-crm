@@ -76,7 +76,7 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
             },
             async ({ contactNumber, message }: { contactNumber: string, message?: string }) => {
                 try {
-                    const env = this.context.env as ExtendedEnv;
+                    const env = this.env as ExtendedEnv;
                     const googleSheets = new GoogleSheetsService(
                         env.GOOGLE_ACCESS_TOKEN,
                         env.GOOGLE_SHEET_ID
