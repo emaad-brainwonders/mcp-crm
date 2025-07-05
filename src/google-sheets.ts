@@ -88,4 +88,35 @@ export class GoogleSheetsService {
             throw new Error(`Failed to update Google Sheet: ${error}`);
         }
     }
+
+    /**
+     * Appends only new chat lines to the existing chat history cell.
+     * @param email User email
+     * @param contactNumber User contact number
+     * @param newChatLines Array of new chat lines to append
+     * @param otherValues Other columns (timestamp, summary, userId, etc)
+     */
+    async appendChatLinesToRow(email: string, contactNumber: string, newChatLines: string[], otherValues: string[]): Promise<void> {
+        const found = await this.findRowByEmailAndContact(email, contactNumber);
+        if (found) {
+            // Only append new lines to the chat history cell (column 5, index 4)
+            let prevHistory = found.values[4] || '';
+            let mergedHistory = prevHistory;
+            if (newChatLines.length > 0) {
+                mergedHistory = prevHistory ? prevHistory + '\n' + newChatLines.join('\n') : newChatLines.join('\n');
+            }
+            // otherValues: [timestamp, summary, userId]
+            await this.updateRow(found.rowIndex, [otherValues[0], email, contactNumber, otherValues[1], mergedHistory, otherValues[2]]);
+        } else {
+            // If not found, create new row with just the new chat lines
+            await this.appendRow([
+                otherValues[0],
+                email,
+                contactNumber,
+                otherValues[1],
+                newChatLines.join('\n'),
+                otherValues[2]
+            ]);
+        }
+    }
 }
