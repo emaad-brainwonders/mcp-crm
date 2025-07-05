@@ -36,5 +36,13 @@
   },
   "dev": {
     "port": 8788
-  }
+  },
+  "vars": {
+    "WORKOS_CLIENT_ID": "client_01JYK402FD2XQ392316BY5RP1Q"
+    "GOOGLE_SHEET_ID": "1srjJFaMgoNcZbadGpe9ipMz5gqzFfO8kCiPsfYYmHC0"
+  },
+  "secrets": [
+    "WORKOS_CLIENT_SECRET",
+    "GOOGLE_ACCESS_TOKEN"
+  ]
 }
