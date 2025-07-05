@@ -158,6 +158,29 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
             }
         );
 
+        // Session management tool
+        this.server.tool(
+            "endSession",
+            "End the current session and save chat history",
+            {
+                reason: z.string().optional().describe("Optional reason for ending the session")
+            },
+            async ({ reason }) => {
+                const result = await this.saveChatHistoryToSheet(reason || 'Session ended by user');
+                
+                // Clear chat history after saving
+                this.chatHistory = [];
+                this.userContactNumber = null;
+                
+                return {
+                    content: [{
+                        type: "text" as const,
+                        text: `Session ended successfully. ${result.content[0].text}`
+                    }],
+                };
+            }
+        );
+
         // Chat history tool
         this.server.tool(
             "saveChatHistory",
@@ -290,19 +313,15 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
     }
 
     private setupDisconnectionHandler() {
-        // For Cloudflare Workers, we need to handle cleanup differently
-        // Use addEventListener for 'beforeunload' or similar events
-        if (typeof addEventListener !== 'undefined') {
-            addEventListener('beforeunload', () => {
-                this.handleDisconnection();
-            });
-        }
+        // In Cloudflare Workers, we don't have traditional process events
+        // Instead, we'll rely on manual cleanup calls and request lifecycle
         
-        // Alternative: Use a cleanup registry if available
-        if (typeof globalThis !== 'undefined' && globalThis.addEventListener) {
-            globalThis.addEventListener('beforeunload', () => {
+        // Add a cleanup timer as a fallback (optional)
+        if (typeof setTimeout !== 'undefined') {
+            // Set a cleanup timer for long-running sessions (e.g., 30 minutes)
+            setTimeout(() => {
                 this.handleDisconnection();
-            });
+            }, 30 * 60 * 1000); // 30 minutes
         }
     }
 
