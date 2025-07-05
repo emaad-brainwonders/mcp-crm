@@ -43,7 +43,6 @@
   },
   "secrets": [
     "WORKOS_CLIENT_SECRET",
-    "GOOGLE_ACCESS_TOKEN",
-    "GOOGLE_REFRESH_TOKEN"
+    "GOOGLE_ACCESS_TOKEN"
   ]
 }
