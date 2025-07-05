@@ -1,0 +1,32 @@
+{
+	"name": "mcp-crm",
+	"version": "0.0.1",
+	"private": true,
+	"scripts": {
+		"build": "tsc -p .",
+		"cf-typegen": "wrangler types --env example",
+		"deploy": "wrangler deploy",
+		"dev": "wrangler dev",
+		"format": "biome format --write",
+		"lint": "biome lint",
+		"lint:fix": "biome lint --fix",
+		"start": "wrangler dev",
+		"type-check": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@cloudflare/workers-oauth-provider": "^0.0.5",
+		"@modelcontextprotocol/sdk": "1.13.1",
+		"@workos-inc/node": "^7.57.0",
+		"agents": "^0.0.100",
+		"hono": "^4.8.3",
+		"jose": "^6.0.11",
+		"workers-mcp": "^0.0.13",
+		"zod": "^3.25.67"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.0.6",
+		"@cloudflare/workers-types": "^4.20250701.0",
+		"typescript": "^5.8.3",
+		"wrangler": "^4.22.0"
+	}
+}
