@@ -27,6 +27,9 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
     private userContactNumber: string | null = null;
     private connectionStartTime: Date = new Date();
 
+    // Track the last chat index written to the sheet
+    private lastChatIndexSaved: number = 0;
+
     async init() {
         // Send welcome message and request contact number on connection
         this.sendWelcomeMessage();
@@ -312,24 +315,49 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
         await this.handleDisconnection();
     }
 
-    // Patch: Save after every assistant reply
+    // Patch: Save only new chat lines after every assistant/user reply
     private async pushAssistantReply(content: string) {
         this.chatHistory.push({
             role: 'assistant',
             content,
             timestamp: new Date()
         });
-        await this.saveChatHistoryToSheet();
+        await this.saveNewChatLinesToSheet();
     }
 
-    // Patch: Save after every user reply
     private async pushUserReply(content: string) {
         this.chatHistory.push({
             role: 'user',
             content,
             timestamp: new Date()
         });
-        await this.saveChatHistoryToSheet();
+        await this.saveNewChatLinesToSheet();
+    }
+
+    /**
+     * Save only new chat lines to the sheet, appending to the chat cell.
+     */
+    private async saveNewChatLinesToSheet() {
+        const env = this.env as ExtendedEnv;
+        const googleSheets = new GoogleSheetsService(env.GOOGLE_ACCESS_TOKEN, env.GOOGLE_SHEET_ID);
+        await googleSheets.ensureHeaders();
+        const email = this.props.user.email;
+        const contact = this.userContactNumber || 'Not provided';
+        const userId = this.props.user.id;
+        const now = new Date().toISOString();
+        // Only new chat lines since last save
+        const newLines = this.chatHistory.slice(this.lastChatIndexSaved).map(msg => `[${msg.timestamp.toISOString()}] ${msg.role}: ${msg.content}`);
+        if (newLines.length === 0) return;
+        const sessionDuration = new Date().getTime() - this.connectionStartTime.getTime();
+        const durationMinutes = Math.round(sessionDuration / (1000 * 60));
+        const sessionSummary = `Chat session - Duration: ${durationMinutes} minutes, Messages: ${this.chatHistory.length}`;
+        await googleSheets.appendChatLinesToRow(
+            email,
+            contact,
+            newLines,
+            [now, sessionSummary, userId]
+        );
+        this.lastChatIndexSaved = this.chatHistory.length;
     }
 }
 
