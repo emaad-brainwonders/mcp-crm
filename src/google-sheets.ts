@@ -1,3 +1,5 @@
+/// <reference lib="webworker" />
+
 export class GoogleSheetsService {
     private accessToken: string;
     private sheetId: string;
@@ -6,15 +8,16 @@ export class GoogleSheetsService {
     private clientSecret: string;
     private tokenExpiry: number | null = null;
 
-    constructor(accessToken: string, sheetId: string, refreshToken: string, clientId: string, clientSecret: string) {
+    constructor(accessToken: string, sheetId: string, refreshToken?: string, clientId?: string, clientSecret?: string) {
         this.accessToken = accessToken;
         this.sheetId = sheetId;
-        this.refreshToken = refreshToken;
-        this.clientId = clientId;
-        this.clientSecret = clientSecret;
+        this.refreshToken = refreshToken || '';
+        this.clientId = clientId || '';
+        this.clientSecret = clientSecret || '';
     }
 
     private async refreshAccessTokenIfNeeded(): Promise<void> {
+        if (!this.refreshToken || !this.clientId || !this.clientSecret) return;
         if (this.tokenExpiry && Date.now() < this.tokenExpiry - 60000) {
             // Token is still valid (with 1 min buffer)
             return;
@@ -35,8 +38,8 @@ export class GoogleSheetsService {
             const error = await response.text();
             throw new Error(`Failed to refresh access token: ${error}`);
         }
-        const data = await response.json();
-        this.accessToken = data.access_token;
+        const data = (await response.json()) as { access_token?: string; expires_in?: number };
+        this.accessToken = data.access_token || this.accessToken;
         if (data.expires_in) {
             this.tokenExpiry = Date.now() + data.expires_in * 1000;
         }
