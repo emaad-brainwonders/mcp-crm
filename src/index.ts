@@ -24,7 +24,13 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
         timestamp: Date;
     }> = [];
 
+    private userContactNumber: string | null = null;
+    private connectionStartTime: Date = new Date();
+
     async init() {
+        // Send welcome message and request contact number on connection
+        this.sendWelcomeMessage();
+
         // Hello, world!
         this.server.tool(
             "add",
@@ -51,7 +57,38 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
             }
         );
 
-        // Contact saving tool
+        // Contact number capture tool
+        this.server.tool(
+            "setContactNumber",
+            "Set user's contact number for this session",
+            {
+                contactNumber: z.string().describe("The user's contact/phone number")
+            },
+            async ({ contactNumber }) => {
+                this.userContactNumber = contactNumber;
+                
+                // Track this interaction
+                this.chatHistory.push({
+                    role: 'user',
+                    content: `Contact number provided: ${contactNumber}`,
+                    timestamp: new Date()
+                });
+                this.chatHistory.push({
+                    role: 'assistant',
+                    content: 'Contact number saved for this session',
+                    timestamp: new Date()
+                });
+
+                return {
+                    content: [{
+                        type: "text",
+                        text: `Thank you! Your contact number ${contactNumber} has been saved for this session. How can I help you today?`
+                    }],
+                };
+            }
+        );
+
+        // Contact saving tool (legacy - kept for backwards compatibility)
         this.server.tool(
             "saveContact",
             "Save user contact information to Google Sheet",
@@ -85,6 +122,11 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
                         chatSummary,
                         this.props.user.id
                     ]);
+
+                    // Update session contact number if provided
+                    if (contactNumber) {
+                        this.userContactNumber = contactNumber;
+                    }
 
                     // Track this interaction
                     this.chatHistory.push({
@@ -124,46 +166,7 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
                 summary: z.string().optional().describe("Optional summary of the conversation")
             },
             async ({ summary }) => {
-                try {
-                    const env = this.env as ExtendedEnv;
-                    const googleSheets = new GoogleSheetsService(
-                        env.GOOGLE_ACCESS_TOKEN,
-                        env.GOOGLE_SHEET_ID
-                    );
-
-                    // Ensure headers exist
-                    await googleSheets.ensureHeaders();
-
-                    // Prepare full chat history
-                    const fullChatHistory = this.chatHistory
-                        .map(msg => `[${msg.timestamp.toISOString()}] ${msg.role}: ${msg.content}`)
-                        .join('\n');
-
-                    // Save to Google Sheet
-                    await googleSheets.appendRow([
-                        new Date().toISOString(),
-                        this.props.user.email,
-                        '', // No contact number for this entry
-                        summary || 'Chat history save',
-                        fullChatHistory,
-                        this.props.user.id
-                    ]);
-
-                    return {
-                        content: [{
-                            type: "text",
-                            text: `Chat history saved successfully!\n\nSaved ${this.chatHistory.length} interactions for user: ${this.props.user.email}`
-                        }],
-                    };
-                } catch (error) {
-                    console.error('Error saving chat history:', error);
-                    return {
-                        content: [{
-                            type: "text",
-                            text: `Failed to save chat history: ${error instanceof Error ? error.message : 'Unknown error'}`
-                        }],
-                    };
-                }
+                return await this.saveChatHistoryToSheet(summary);
             }
         );
 
@@ -221,6 +224,109 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
                     };
                 }
             );
+        }
+
+        // Set up cleanup handler for disconnection
+        this.setupDisconnectionHandler();
+    }
+
+    private sendWelcomeMessage() {
+        // Add welcome message to chat history
+        this.chatHistory.push({
+            role: 'assistant',
+            content: 'Welcome to the MCP Assistant! To get started, please provide your contact number so I can assist you better.',
+            timestamp: new Date()
+        });
+    }
+
+    private async saveChatHistoryToSheet(summary?: string) {
+        try {
+            const env = this.env as ExtendedEnv;
+            const googleSheets = new GoogleSheetsService(
+                env.GOOGLE_ACCESS_TOKEN,
+                env.GOOGLE_SHEET_ID
+            );
+
+            // Ensure headers exist
+            await googleSheets.ensureHeaders();
+
+            // Prepare full chat history
+            const fullChatHistory = this.chatHistory
+                .map(msg => `[${msg.timestamp.toISOString()}] ${msg.role}: ${msg.content}`)
+                .join('\n');
+
+            // Calculate session duration
+            const sessionDuration = new Date().getTime() - this.connectionStartTime.getTime();
+            const durationMinutes = Math.round(sessionDuration / (1000 * 60));
+
+            // Create session summary
+            const sessionSummary = summary || `Chat session - Duration: ${durationMinutes} minutes, Messages: ${this.chatHistory.length}`;
+
+            // Save to Google Sheet
+            await googleSheets.appendRow([
+                new Date().toISOString(),
+                this.props.user.email,
+                this.userContactNumber || 'Not provided',
+                sessionSummary,
+                fullChatHistory,
+                this.props.user.id
+            ]);
+
+            return {
+                content: [{
+                    type: "text",
+                    text: `Chat history saved successfully!\n\nSession Summary:\n- Duration: ${durationMinutes} minutes\n- Messages: ${this.chatHistory.length}\n- User: ${this.props.user.email}\n- Contact: ${this.userContactNumber || 'Not provided'}`
+                }],
+            };
+        } catch (error) {
+            console.error('Error saving chat history:', error);
+            return {
+                content: [{
+                    type: "text",
+                    text: `Failed to save chat history: ${error instanceof Error ? error.message : 'Unknown error'}`
+                }],
+            };
+        }
+    }
+
+    private setupDisconnectionHandler() {
+        // Handle process termination
+        process.on('SIGINT', this.handleDisconnection.bind(this));
+        process.on('SIGTERM', this.handleDisconnection.bind(this));
+        
+        // Handle uncaught exceptions
+        process.on('uncaughtException', (error) => {
+            console.error('Uncaught exception:', error);
+            this.handleDisconnection();
+        });
+
+        // Handle unhandled promise rejections
+        process.on('unhandledRejection', (reason, promise) => {
+            console.error('Unhandled rejection at:', promise, 'reason:', reason);
+            this.handleDisconnection();
+        });
+    }
+
+    private async handleDisconnection() {
+        try {
+            console.log('Handling disconnection - saving chat history...');
+            
+            // Only save if we have some chat history and a valid session
+            if (this.chatHistory.length > 1) {
+                await this.saveChatHistoryToSheet('Session ended - Auto-saved on disconnection');
+                console.log('Chat history saved successfully on disconnection');
+            }
+        } catch (error) {
+            console.error('Error saving chat history on disconnection:', error);
+        }
+    }
+
+    // Override the cleanup method if it exists in the parent class
+    async cleanup() {
+        await this.handleDisconnection();
+        // Call parent cleanup if it exists
+        if (super.cleanup) {
+            await super.cleanup();
         }
     }
 }
