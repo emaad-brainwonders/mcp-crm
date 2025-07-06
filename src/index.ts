@@ -43,8 +43,7 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
             { a: z.number(), b: z.number() },
             async ({ a, b }: { a: number, b: number }) => {
                 const result = String(a + b);
-                // Do NOT call pushUserReply here; only call it when the user sends a message
-                await this.pushAssistantReply(result);
+                await this.pushAssistantReply(`Added ${a} + ${b} = ${result}`);
                 return {
                     content: [{ type: "text", text: result }],
                 };
@@ -60,11 +59,12 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
             },
             async ({ contactNumber }: { contactNumber: string }) => {
                 this.userContactNumber = contactNumber;
-                await this.pushAssistantReply('Contact number saved for this session');
+                const response = `Your contact number ${contactNumber} has been saved for this session. How can I help you today?`;
+                await this.pushAssistantReply(response);
                 return {
                     content: [{
                         type: "text" as const,
-                        text: `Thank you! Your contact number ${contactNumber} has been saved for this session. How can I help you today?`
+                        text: response
                     }],
                 };
             }
@@ -113,8 +113,8 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
                     if (contactNumber) {
                         this.userContactNumber = contactNumber;
                     }
-                    await this.pushUserReply(`saveContact(${contactNumber}, ${message || 'no message'})`);
-                    await this.pushAssistantReply('Contact saved successfully');
+                    const response = 'Contact saved successfully';
+                    await this.pushAssistantReply(response);
                     return {
                         content: [{
                             type: "text" as const,
@@ -122,11 +122,12 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
                         }],
                     };
                 } catch (error) {
-                    await this.pushAssistantReply(`Failed to save contact: ${error instanceof Error ? error.message : 'Unknown error'}`);
+                    const errorMsg = `Failed to save contact: ${error instanceof Error ? error.message : 'Unknown error'}`;
+                    await this.pushAssistantReply(errorMsg);
                     return {
                         content: [{
                             type: "text" as const,
-                            text: `Failed to save contact: ${error instanceof Error ? error.message : 'Unknown error'}`
+                            text: errorMsg
                         }],
                     };
                 }
@@ -200,16 +201,7 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
                     );
 
                     // Track this interaction
-                    this.chatHistory.push({
-                        role: 'user',
-                        content: `generateImage("${prompt}", ${steps})`,
-                        timestamp: new Date()
-                    });
-                    this.chatHistory.push({
-                        role: 'assistant',
-                        content: 'Generated image successfully',
-                        timestamp: new Date()
-                    });
+                    await this.pushAssistantReply('Generated image successfully');
 
                     return {
                         content: [
@@ -223,8 +215,6 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
                 }
             );
         }
-
-        // Set up cleanup handler for disconnection
 
         // Start auto-save timer (every 5 minutes)
         this.startAutoSaveTimer();
@@ -326,8 +316,8 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
         await this.handleDisconnection();
     }
 
-    // Patch: Save only new chat lines after every assistant/user reply
-    private async pushAssistantReply(content: string) {
+    // Helper methods to track chat history
+    async pushAssistantReply(content: string) {
         this.chatHistory.push({
             role: 'assistant',
             content,
@@ -336,12 +326,35 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
         await this.saveChatHistoryToSheet(); // Save full chat history after every assistant reply
     }
 
-    private async pushUserReply(content: string) {
+    async pushUserReply(content: string) {
         this.chatHistory.push({
             role: 'user',
             content,
             timestamp: new Date()
         });
+    }
+
+    // NEW: Method to record complete conversation messages
+    async recordConversationMessage(role: 'user' | 'assistant', content: string) {
+        this.chatHistory.push({
+            role,
+            content,
+            timestamp: new Date()
+        });
+    }
+
+    // NEW: Method to record entire conversation flow
+    async recordConversationFlow(messages: Array<{role: 'user' | 'assistant', content: string}>) {
+        const timestamp = new Date();
+        for (const message of messages) {
+            this.chatHistory.push({
+                role: message.role,
+                content: message.content,
+                timestamp: new Date(timestamp.getTime() + this.chatHistory.length * 100) // Slight offset for ordering
+            });
+        }
+        // Auto-save after recording conversation flow
+        await this.saveChatHistoryToSheet();
     }
 
     /**
@@ -370,10 +383,11 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
         this.lastChatIndexSaved = this.chatHistory.length;
     }
 
-    // Example handler for user input
-    async onUserMessage(userInput: string) {
-        await this.pushUserReply(userInput); // userInput is the actual message from the user
-        // ...then process the message, call tools, etc.
+    // NEW: Public method to get MCP instance for recording conversations
+    static getInstance(): MyMCP | null {
+        // You'll need to implement a way to get the current MCP instance
+        // This depends on your application architecture
+        return null; // Placeholder - implement based on your needs
     }
 }
 
