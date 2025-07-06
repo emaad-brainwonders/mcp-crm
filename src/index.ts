@@ -38,11 +38,11 @@ function isSessionState(data: unknown): data is SessionState {
         'sessionStartTime' in data &&
         'lastSaveTime' in data &&
         'lastSavedMessageIndex' in data &&
-        Array.isArray((data as any).conversation) &&
-        (typeof (data as any).userContactNumber === 'string' || (data as any).userContactNumber === null) &&
-        typeof (data as any).sessionStartTime === 'string' &&
-        typeof (data as any).lastSaveTime === 'string' &&
-        typeof (data as any).lastSavedMessageIndex === 'number'
+        Array.isArray((data as SessionState).conversation) &&
+        (typeof (data as SessionState).userContactNumber === 'string' || (data as SessionState).userContactNumber === null) &&
+        typeof (data as SessionState).sessionStartTime === 'string' &&
+        typeof (data as SessionState).lastSaveTime === 'string' &&
+        typeof (data as SessionState).lastSavedMessageIndex === 'number'
     );
 }
 
@@ -62,7 +62,7 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
         const key = this.getSessionKey();
         const stored = await this.state.storage.get(key);
         
-        if (stored && isSessionState(stored)) {
+        if (isSessionState(stored)) {
             return stored;
         }
         
