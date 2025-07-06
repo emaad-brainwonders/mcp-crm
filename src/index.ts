@@ -27,6 +27,9 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
         // Welcome message
         console.log(`Initializing MCP for user: ${this.userEmail}`);
 
+        // Load existing contact number for this email
+        await this.loadExistingContactNumber();
+
         // Set contact number
         this.server.tool(
             "setContactNumber",
@@ -226,6 +229,56 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
         return match ? this.normalizePhone(match[1]) : null;
     }
 
+    private async loadExistingContactNumber(): Promise<void> {
+        try {
+            const env = this.env as ExtendedEnv;
+            const url = `https://sheets.googleapis.com/v4/spreadsheets/${env.GOOGLE_SHEET_ID}/values/Sheet1!A:F`;
+            
+            const response = await fetch(url, {
+                headers: {
+                    'Authorization': `Bearer ${env.GOOGLE_ACCESS_TOKEN}`,
+                }
+            });
+
+            if (response.ok) {
+                const data = await response.json() as { values?: string[][] };
+                const rows = data.values || [];
+                
+                // Find the most recent entry for this email
+                let mostRecentRow: string[] | null = null;
+                let mostRecentDate: Date | null = null;
+                
+                for (let i = 1; i < rows.length; i++) { // Skip header row
+                    const row = rows[i];
+                    if (row && row.length >= 6) {
+                        const rowEmail = (row[1] || '').toLowerCase().trim();
+                        
+                        if (rowEmail === this.userEmail) {
+                            try {
+                                const rowDate = new Date(row[0]);
+                                if (!mostRecentDate || rowDate > mostRecentDate) {
+                                    mostRecentDate = rowDate;
+                                    mostRecentRow = row;
+                                }
+                            } catch (e) {
+                                // Invalid date, skip this row
+                                continue;
+                            }
+                        }
+                    }
+                }
+                
+                if (mostRecentRow && mostRecentRow[2]) {
+                    this.contactNumber = mostRecentRow[2];
+                    console.log(`Loaded existing contact number for ${this.userEmail}: ${this.contactNumber}`);
+                }
+            }
+        } catch (error) {
+            console.error('Error loading existing contact number:', error);
+            // Don't throw - just continue without loading existing contact
+        }
+    }
+
     private async saveToSheet(message: string): Promise<string> {
         try {
             const env = this.env as ExtendedEnv;
@@ -236,7 +289,7 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
                 this.userEmail,
                 this.contactNumber || "Not provided",
                 String(this.messageCount),
-                message.substring(0, 200), // Limit message length
+                message, // No longer truncating the message
                 this.props.user.id
             ];
 
@@ -254,7 +307,7 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
             });
 
             if (response.ok) {
-                console.log(`✅ Saved to Google Sheets: ${this.userEmail} - ${message.substring(0, 50)}...`);
+                console.log(`✅ Saved to Google Sheets: ${this.userEmail} - ${message.substring(0, 100)}...`);
                 return `✅ Saved to CRM: ${this.userEmail} (${this.contactNumber || 'no contact'})`;
             } else {
                 const error = await response.text();
