@@ -19,21 +19,63 @@ interface ConversationMessage {
     timestamp: string;
 }
 
+// Session state interface
+interface SessionState {
+    conversation: ConversationMessage[];
+    userContactNumber: string | null;
+    sessionStartTime: string;
+    lastSaveTime: string;
+    lastSavedMessageIndex: number;
+}
+
 export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
     server = new McpServer({
         name: "MCP CRM Chat Assistant",
         version: "2.0.0",
     });
 
-    private conversation: ConversationMessage[] = [];
-    private userContactNumber: string | null = null;
-    private sessionStartTime: string = new Date().toISOString();
-    private lastSaveTime: string = new Date().toISOString();
-    private lastSavedMessageIndex: number = 0; // Track which messages have been saved
+    // Use a key to store/retrieve session state
+    private getSessionKey(): string {
+        return `session_${this.props.user.id}`;
+    }
+
+    // Get session state from storage or create new one
+    private async getSessionState(): Promise<SessionState> {
+        const key = this.getSessionKey();
+        const stored = await this.state.storage.get<SessionState>(key);
+        
+        if (stored) {
+            return stored;
+        }
+        
+        // Create new session state
+        const newState: SessionState = {
+            conversation: [],
+            userContactNumber: null,
+            sessionStartTime: new Date().toISOString(),
+            lastSaveTime: new Date().toISOString(),
+            lastSavedMessageIndex: 0
+        };
+        
+        await this.state.storage.put(key, newState);
+        return newState;
+    }
+
+    // Save session state to storage
+    private async saveSessionState(state: SessionState): Promise<void> {
+        const key = this.getSessionKey();
+        await this.state.storage.put(key, state);
+    }
 
     async init() {
-        // Initialize session
-        await this.addMessage('assistant', 'Welcome! Please provide your contact number to get started.');
+        // Initialize session state
+        const sessionState = await this.getSessionState();
+        
+        // Add welcome message if this is a new session
+        if (sessionState.conversation.length === 0) {
+            await this.addMessage('assistant', 'Welcome! Please provide your contact number to get started.');
+        }
+        
         await this.initializeGoogleSheets();
 
         // Main conversation handler - this captures ALL user interactions
@@ -46,14 +88,17 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
                 saveToSheet: z.coerce.boolean().default(true).describe("Whether to save to Google Sheets")
             },
             async ({ userMessage, assistantResponse, saveToSheet }) => {
+                const sessionState = await this.getSessionState();
+                
                 // Add both messages to conversation
                 await this.addMessage('user', userMessage);
                 await this.addMessage('assistant', assistantResponse);
 
-                // Check if this is a contact number
+                // Check if this is a contact number and update session state
                 if (this.isContactNumber(userMessage)) {
-                    this.userContactNumber = this.extractContactNumber(userMessage);
-                    console.log(`Contact number extracted: ${this.userContactNumber}`);
+                    sessionState.userContactNumber = this.extractContactNumber(userMessage);
+                    await this.saveSessionState(sessionState);
+                    console.log(`Contact number extracted and saved: ${sessionState.userContactNumber}`);
                 }
 
                 // Save to Google Sheets if requested
@@ -61,10 +106,13 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
                     await this.saveConversationToSheet();
                 }
 
+                // Get updated session state for response
+                const updatedState = await this.getSessionState();
+                
                 return {
                     content: [{
                         type: "text" as const,
-                        text: `Conversation recorded: ${this.conversation.length} messages total. Contact: ${this.userContactNumber || 'Not set'}`
+                        text: `Conversation recorded: ${updatedState.conversation.length} messages total. Contact: ${updatedState.userContactNumber || 'Not set'}`
                     }],
                 };
             }
@@ -78,14 +126,17 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
                 contactNumber: z.string().describe("User's contact number")
             },
             async ({ contactNumber }) => {
-                this.userContactNumber = this.normalizeContactNumber(contactNumber);
-                await this.addMessage('assistant', `Contact number ${this.userContactNumber} saved successfully.`);
+                const sessionState = await this.getSessionState();
+                sessionState.userContactNumber = this.normalizeContactNumber(contactNumber);
+                await this.saveSessionState(sessionState);
+                
+                await this.addMessage('assistant', `Contact number ${sessionState.userContactNumber} saved successfully.`);
                 await this.saveConversationToSheet();
                 
                 return {
                     content: [{
                         type: "text" as const,
-                        text: `Contact number ${this.userContactNumber} has been saved.`
+                        text: `Contact number ${sessionState.userContactNumber} has been saved.`
                     }],
                 };
             }
@@ -102,9 +153,11 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
                 })).describe("Array of conversation messages")
             },
             async ({ messages }) => {
+                const sessionState = await this.getSessionState();
+                
                 // Clear existing conversation
-                this.conversation = [];
-                this.lastSavedMessageIndex = 0;
+                sessionState.conversation = [];
+                sessionState.lastSavedMessageIndex = 0;
                 
                 // Add all messages with timestamps
                 for (const msg of messages) {
@@ -114,19 +167,19 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
                 // Extract contact number if present
                 for (const msg of messages) {
                     if (msg.role === 'user' && this.isContactNumber(msg.content)) {
-                        this.userContactNumber = this.extractContactNumber(msg.content);
-                        console.log(`Contact number found in import: ${this.userContactNumber}`);
+                        sessionState.userContactNumber = this.extractContactNumber(msg.content);
+                        console.log(`Contact number found in import: ${sessionState.userContactNumber}`);
                         break;
                     }
                 }
 
-                // Save to Google Sheets
+                await this.saveSessionState(sessionState);
                 await this.saveConversationToSheet();
 
                 return {
                     content: [{
                         type: "text" as const,
-                        text: `Imported ${messages.length} messages. Contact: ${this.userContactNumber || 'Not found'}`
+                        text: `Imported ${messages.length} messages. Contact: ${sessionState.userContactNumber || 'Not found'}`
                     }],
                 };
             }
@@ -154,15 +207,16 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
             "Get current session status and conversation info",
             {},
             async () => {
+                const sessionState = await this.getSessionState();
                 const status = {
-                    sessionStart: this.sessionStartTime,
-                    totalMessages: this.conversation.length,
-                    unsavedMessages: this.conversation.length - this.lastSavedMessageIndex,
-                    contactNumber: this.userContactNumber || 'Not set',
-                    normalizedContact: this.userContactNumber ? this.normalizeContactNumber(this.userContactNumber) : 'N/A',
+                    sessionStart: sessionState.sessionStartTime,
+                    totalMessages: sessionState.conversation.length,
+                    unsavedMessages: sessionState.conversation.length - sessionState.lastSavedMessageIndex,
+                    contactNumber: sessionState.userContactNumber || 'Not set',
+                    normalizedContact: sessionState.userContactNumber ? this.normalizeContactNumber(sessionState.userContactNumber) : 'N/A',
                     userEmail: this.props.user.email,
                     normalizedEmail: this.normalizeEmail(this.props.user.email),
-                    lastSaved: this.lastSaveTime
+                    lastSaved: sessionState.lastSaveTime
                 };
 
                 return {
@@ -192,8 +246,9 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
                     console.log('Unique email-contact pairs in sheet:', pairs);
                     
                     // Test the find function
+                    const sessionState = await this.getSessionState();
                     const email = this.normalizeEmail(this.props.user.email);
-                    const contact = this.userContactNumber ? this.normalizeContactNumber(this.userContactNumber) : 'Not provided';
+                    const contact = sessionState.userContactNumber ? this.normalizeContactNumber(sessionState.userContactNumber) : 'Not provided';
                     
                     console.log(`Testing find function for: "${email}" + "${contact}"`);
                     const result = await googleSheets.findRowByEmailAndContact(email, contact);
@@ -322,11 +377,13 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
     }
 
     private async addMessage(role: 'user' | 'assistant', content: string) {
-        this.conversation.push({
+        const sessionState = await this.getSessionState();
+        sessionState.conversation.push({
             role,
             content,
             timestamp: new Date().toISOString()
         });
+        await this.saveSessionState(sessionState);
     }
 
     private isContactNumber(message: string): boolean {
@@ -370,50 +427,51 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
         return contactNumber.trim();
     }
 
-   private async saveConversationToSheet(): Promise<string> {
-    try {
-        const env = this.env as ExtendedEnv;
-        const googleSheets = new GoogleSheetsService(env.GOOGLE_ACCESS_TOKEN, env.GOOGLE_SHEET_ID);
+    private async saveConversationToSheet(): Promise<string> {
+        try {
+            const env = this.env as ExtendedEnv;
+            const googleSheets = new GoogleSheetsService(env.GOOGLE_ACCESS_TOKEN, env.GOOGLE_SHEET_ID);
+            const sessionState = await this.getSessionState();
 
-        const newMessages = this.conversation.slice(this.lastSavedMessageIndex);
-        if (newMessages.length === 0) return "No new messages to save.";
+            const newMessages = sessionState.conversation.slice(sessionState.lastSavedMessageIndex);
+            if (newMessages.length === 0) return "No new messages to save.";
 
-        const email = this.normalizeEmail(this.props.user.email);
-        
-        // Fix: Use userContactNumber directly instead of checking props.contactNumber first
-        const contact = this.userContactNumber ? this.normalizeContactNumber(this.userContactNumber) : null;
+            const email = this.normalizeEmail(this.props.user.email);
+            const contact = sessionState.userContactNumber ? this.normalizeContactNumber(sessionState.userContactNumber) : null;
 
-        if (!contact) {
-            console.log('No contact number available, skipping save');
-            return "Contact number not provided. Please set contact number first.";
+            if (!contact) {
+                console.log('No contact number available, skipping save');
+                return "Contact number not provided. Please set contact number first.";
+            }
+
+            const newChatLines = newMessages.map(msg =>
+                `[${msg.timestamp}] ${msg.role.toUpperCase()}: ${msg.content}`
+            );
+
+            const userId = this.props.user.id;
+            const now = new Date().toISOString();
+            const summary = `Session: ${sessionState.conversation.length} messages total, Latest: ${newMessages.length} new messages`;
+
+            console.log(`Saving to sheet: Email="${email}", Contact="${contact}"`);
+
+            await googleSheets.appendChatLinesToRow(
+                email,
+                contact,
+                newChatLines,
+                [now, summary, userId]
+            );
+
+            // Update session state
+            sessionState.lastSavedMessageIndex = sessionState.conversation.length;
+            sessionState.lastSaveTime = now;
+            await this.saveSessionState(sessionState);
+
+            return `Successfully saved ${newMessages.length} new messages to Google Sheets! Total: ${sessionState.conversation.length} messages, Email: ${email}, Contact: ${contact}`;
+        } catch (error) {
+            console.error('Error saving to Google Sheets:', error);
+            return `Error saving conversation: ${error instanceof Error ? error.message : 'Unknown error'}`;
         }
-
-        const newChatLines = newMessages.map(msg =>
-            `[${msg.timestamp}] ${msg.role.toUpperCase()}: ${msg.content}`
-        );
-
-        const userId = this.props.user.id;
-        const now = new Date().toISOString();
-        const summary = `Session: ${this.conversation.length} messages total, Latest: ${newMessages.length} new messages`;
-
-        console.log(`Saving to sheet: Email="${email}", Contact="${contact}"`);
-
-        await googleSheets.appendChatLinesToRow(
-            email,
-            contact,
-            newChatLines,
-            [now, summary, userId]
-        );
-
-        this.lastSavedMessageIndex = this.conversation.length;
-        this.lastSaveTime = now;
-
-        return `Successfully saved ${newMessages.length} new messages to Google Sheets! Total: ${this.conversation.length} messages, Email: ${email}, Contact: ${contact}`;
-    } catch (error) {
-        console.error('Error saving to Google Sheets:', error);
-        return `Error saving conversation: ${error instanceof Error ? error.message : 'Unknown error'}`;
     }
-}
 }
 
 export default new OAuthProvider({
