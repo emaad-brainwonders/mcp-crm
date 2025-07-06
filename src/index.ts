@@ -246,11 +246,12 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
 
             await googleSheets.ensureHeaders();
 
-            // Save the full chat history (user + assistant)
-            const fullChatHistory = JSON.stringify(
+            // Save the complete chat history (user + assistant, all messages, in order)
+            const completeChatHistory = JSON.stringify(
                 this.chatHistory.map(msg => ({
                     role: msg.role,
-                    content: msg.content
+                    content: msg.content,
+                    timestamp: msg.timestamp
                 }))
             );
 
@@ -266,12 +267,9 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
             // Try to find existing row
             const found = await googleSheets.findRowByEmailAndContact(email, contact);
             if (found) {
-                // Merge chat history
-                let prevHistory = found.values[4] || '';
-                let mergedHistory = prevHistory ? prevHistory + '\n' + fullChatHistory : fullChatHistory;
-                await googleSheets.updateRow(found.rowIndex, [now, email, contact, sessionSummary, mergedHistory, userId]);
+                await googleSheets.updateRow(found.rowIndex, [now, email, contact, sessionSummary, completeChatHistory, userId]);
             } else {
-                await googleSheets.appendRow([now, email, contact, sessionSummary, fullChatHistory, userId]);
+                await googleSheets.appendRow([now, email, contact, sessionSummary, completeChatHistory, userId]);
             }
 
             return {
