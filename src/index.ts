@@ -36,31 +36,6 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
         // Send welcome message and request contact number on connection
         this.sendWelcomeMessage();
 
-        // Override the server's request handler to capture all messages
-        const originalRequestHandler = this.server.request.bind(this.server);
-        this.server.request = async (request: any, extra?: any) => {
-            // Log the incoming request to capture user messages
-            if (request.method === 'tools/call' && request.params?.name) {
-                // This is a tool call, we'll handle it in the tool itself
-                const result = await originalRequestHandler(request, extra);
-                return result;
-            } else if (request.method === 'sampling/createMessage' && request.params?.messages) {
-                // This captures the conversation context
-                const messages = request.params.messages;
-                const lastMessage = messages[messages.length - 1];
-                
-                if (lastMessage?.role === 'user' && lastMessage?.content) {
-                    // Record the user message
-                    await this.recordUserMessage(lastMessage.content);
-                }
-                
-                const result = await originalRequestHandler(request, extra);
-                return result;
-            }
-            
-            return originalRequestHandler(request, extra);
-        };
-
         // Hello, world!
         this.server.tool(
             "add",
