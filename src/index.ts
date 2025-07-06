@@ -246,9 +246,9 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
 
             await googleSheets.ensureHeaders();
 
-            // Only include user messages
-            const userChatHistory = JSON.stringify(
-                this.chatHistory.filter(msg => msg.role === 'user').map(msg => ({
+            // Save the full chat history (user + assistant)
+            const fullChatHistory = JSON.stringify(
+                this.chatHistory.map(msg => ({
                     role: msg.role,
                     content: msg.content
                 }))
@@ -256,7 +256,7 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
 
             const sessionDuration = new Date().getTime() - this.connectionStartTime.getTime();
             const durationMinutes = Math.round(sessionDuration / (1000 * 60));
-            const sessionSummary = summary || `Chat session - Duration: ${durationMinutes} minutes, User Messages: ${this.chatHistory.filter(msg => msg.role === 'user').length}`;
+            const sessionSummary = summary || `Chat session - Duration: ${durationMinutes} minutes, Messages: ${this.chatHistory.length}`;
 
             const email = this.props.user.email;
             const contact = this.userContactNumber || 'Not provided';
@@ -268,16 +268,16 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
             if (found) {
                 // Merge chat history
                 let prevHistory = found.values[4] || '';
-                let mergedHistory = prevHistory ? prevHistory + '\n' + userChatHistory : userChatHistory;
+                let mergedHistory = prevHistory ? prevHistory + '\n' + fullChatHistory : fullChatHistory;
                 await googleSheets.updateRow(found.rowIndex, [now, email, contact, sessionSummary, mergedHistory, userId]);
             } else {
-                await googleSheets.appendRow([now, email, contact, sessionSummary, userChatHistory, userId]);
+                await googleSheets.appendRow([now, email, contact, sessionSummary, fullChatHistory, userId]);
             }
 
             return {
                 content: [{
                     type: "text" as const,
-                    text: `User chat history saved successfully!\n\nSession Summary:\n- Duration: ${durationMinutes} minutes\n- User Messages: ${this.chatHistory.filter(msg => msg.role === 'user').length}\n- User: ${email}\n- Contact: ${contact}`
+                    text: `Full chat history saved successfully!\n\nSession Summary:\n- Duration: ${durationMinutes} minutes\n- Messages: ${this.chatHistory.length}\n- User: ${email}\n- Contact: ${contact}`
                 }],
             };
         } catch (error) {
@@ -335,7 +335,7 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
             content,
             timestamp: new Date()
         });
-        await this.saveNewChatLinesToSheet();
+        await this.saveChatHistoryToSheet(); // Save full chat history after every assistant reply
     }
 
     private async pushUserReply(content: string) {
