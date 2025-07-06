@@ -7,7 +7,8 @@ export interface Props {
 	permissions: string[];
 	organizationId?: string;
 
-	// Props must have an index signature to satsify the `McpAgent`
-	// generic `Props` which extends `Record<string, unknown>`.
+	contactNumber?: string;
+
+	// Required to satisfy McpAgent<Props>
 	[key: string]: unknown;
 }
