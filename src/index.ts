@@ -29,6 +29,7 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
     private userContactNumber: string | null = null;
     private sessionStartTime: string = new Date().toISOString();
     private lastSaveTime: string = new Date().toISOString();
+    private lastSavedMessageIndex: number = 0; // Track which messages have been saved
 
     async init() {
         // Initialize session
@@ -102,6 +103,7 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
             async ({ messages }) => {
                 // Clear existing conversation
                 this.conversation = [];
+                this.lastSavedMessageIndex = 0;
                 
                 // Add all messages with timestamps
                 for (const msg of messages) {
@@ -153,6 +155,7 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
                 const status = {
                     sessionStart: this.sessionStartTime,
                     totalMessages: this.conversation.length,
+                    unsavedMessages: this.conversation.length - this.lastSavedMessageIndex,
                     contactNumber: this.userContactNumber || 'Not set',
                     userEmail: this.props.user.email,
                     lastSaved: this.lastSaveTime
@@ -252,37 +255,37 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
             const env = this.env as ExtendedEnv;
             const googleSheets = new GoogleSheetsService(env.GOOGLE_ACCESS_TOKEN, env.GOOGLE_SHEET_ID);
 
-            // Format conversation for Google Sheets
-            const formattedConversation = this.conversation.map(msg => 
+            // Get only new messages since last save
+            const newMessages = this.conversation.slice(this.lastSavedMessageIndex);
+            
+            if (newMessages.length === 0) {
+                return "No new messages to save.";
+            }
+
+            // Format only the new messages
+            const newChatLines = newMessages.map(msg => 
                 `[${msg.timestamp}] ${msg.role.toUpperCase()}: ${msg.content}`
-            ).join('\n');
+            );
 
             const email = this.props.user.email;
             const contact = this.userContactNumber || 'Not provided';
             const userId = this.props.user.id;
             const now = new Date().toISOString();
-            const summary = `Session: ${this.conversation.length} messages, Contact: ${contact}`;
+            const summary = `Session: ${this.conversation.length} messages total, Latest: ${newMessages.length} new messages`;
 
-            // Save to Google Sheets
-            const rowData = [
-                now,                    // Timestamp
-                email,                  // User Email
-                contact,                // Contact Number
-                summary,                // Session Summary
-                formattedConversation,  // Chat History
-                userId                  // User ID
-            ];
+            // Use the appendChatLinesToRow method to append only new messages
+            await googleSheets.appendChatLinesToRow(
+                email,
+                contact,
+                newChatLines,
+                [now, summary, userId] // [timestamp, summary, userId]
+            );
 
-            // Check if row exists and update, otherwise append
-            const existingRow = await googleSheets.findRowByEmailAndContact(email, contact);
-            if (existingRow) {
-                await googleSheets.updateRow(existingRow.rowIndex, rowData);
-            } else {
-                await googleSheets.appendRow(rowData);
-            }
-
+            // Update tracking variables
+            this.lastSavedMessageIndex = this.conversation.length;
             this.lastSaveTime = now;
-            return `Conversation saved successfully! ${this.conversation.length} messages, Contact: ${contact}`;
+
+            return `Successfully appended ${newMessages.length} new messages to Google Sheets! Total: ${this.conversation.length} messages, Contact: ${contact}`;
 
         } catch (error) {
             console.error('Error saving to Google Sheets:', error);
