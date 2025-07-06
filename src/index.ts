@@ -60,8 +60,6 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
             },
             async ({ contactNumber }: { contactNumber: string }) => {
                 this.userContactNumber = contactNumber;
-                await this.pushUserReply(`Contact number provided: ${contactNumber}`);
-                await this.pushUserReply(`saveContact(${contactNumber}, ${message || 'no message'})`);
                 await this.pushAssistantReply('Contact number saved for this session');
                 return {
                     content: [{
