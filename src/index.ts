@@ -371,56 +371,49 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
     }
 
     private async saveConversationToSheet(): Promise<string> {
-        try {
-            const env = this.env as ExtendedEnv;
-            const googleSheets = new GoogleSheetsService(env.GOOGLE_ACCESS_TOKEN, env.GOOGLE_SHEET_ID);
+    try {
+        const env = this.env as ExtendedEnv;
+        const googleSheets = new GoogleSheetsService(env.GOOGLE_ACCESS_TOKEN, env.GOOGLE_SHEET_ID);
 
-            // Get only new messages since last save
-            const newMessages = this.conversation.slice(this.lastSavedMessageIndex);
-            
-            if (newMessages.length === 0) {
-                return "No new messages to save.";
-            }
+        const newMessages = this.conversation.slice(this.lastSavedMessageIndex);
+        if (newMessages.length === 0) return "No new messages to save.";
 
-            // Validate required data
-            const email = this.normalizeEmail(this.props.user.email);
-            const contact = this.userContactNumber ? this.normalizeContactNumber(this.userContactNumber) : null;
-            
-            if (!contact) {
-                console.log('No contact number available, skipping save');
-                return "Contact number not provided. Please set contact number first.";
-            }
+        const email = this.normalizeEmail(this.props.user.email);
+        const contact = this.props.contactNumber
+            ? this.normalizeContactNumber(this.props.contactNumber)
+            : (this.userContactNumber ? this.normalizeContactNumber(this.userContactNumber) : null);
 
-            // Format only the new messages
-            const newChatLines = newMessages.map(msg => 
-                `[${msg.timestamp}] ${msg.role.toUpperCase()}: ${msg.content}`
-            );
-
-            const userId = this.props.user.id;
-            const now = new Date().toISOString();
-            const summary = `Session: ${this.conversation.length} messages total, Latest: ${newMessages.length} new messages`;
-
-            console.log(`Saving to sheet: Email="${email}", Contact="${contact}"`);
-
-            // Use the appendChatLinesToRow method to append only new messages
-            await googleSheets.appendChatLinesToRow(
-                email,
-                contact,
-                newChatLines,
-                [now, summary, userId] // [timestamp, summary, userId]
-            );
-
-            // Update tracking variables
-            this.lastSavedMessageIndex = this.conversation.length;
-            this.lastSaveTime = now;
-
-            return `Successfully saved ${newMessages.length} new messages to Google Sheets! Total: ${this.conversation.length} messages, Email: ${email}, Contact: ${contact}`;
-
-        } catch (error) {
-            console.error('Error saving to Google Sheets:', error);
-            return `Error saving conversation: ${error instanceof Error ? error.message : 'Unknown error'}`;
+        if (!contact) {
+            console.log('No contact number available, skipping save');
+            return "Contact number not provided. Please set contact number first.";
         }
+
+        const newChatLines = newMessages.map(msg =>
+            `[${msg.timestamp}] ${msg.role.toUpperCase()}: ${msg.content}`
+        );
+
+        const userId = this.props.user.id;
+        const now = new Date().toISOString();
+        const summary = `Session: ${this.conversation.length} messages total, Latest: ${newMessages.length} new messages`;
+
+        console.log(`Saving to sheet: Email="${email}", Contact="${contact}"`);
+
+        await googleSheets.appendChatLinesToRow(
+            email,
+            contact,
+            newChatLines,
+            [now, summary, userId]
+        );
+
+        this.lastSavedMessageIndex = this.conversation.length;
+        this.lastSaveTime = now;
+
+        return `Successfully saved ${newMessages.length} new messages to Google Sheets! Total: ${this.conversation.length} messages, Email: ${email}, Contact: ${contact}`;
+    } catch (error) {
+        console.error('Error saving to Google Sheets:', error);
+        return `Error saving conversation: ${error instanceof Error ? error.message : 'Unknown error'}`;
     }
+}
 }
 
 export default new OAuthProvider({
