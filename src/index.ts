@@ -20,6 +20,8 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
     private userEmail: string = "";
     private contactNumber: string | null = null;
     private messageCount: number = 0;
+    private userRowIndex: number | null = null;
+    private chatHistory: string[] = [];
 
     async init() {
         this.userEmail = this.props.user.email.toLowerCase().trim();
@@ -27,8 +29,8 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
         // Welcome message
         console.log(`Initializing MCP for user: ${this.userEmail}`);
 
-        // Load existing contact number for this email
-        await this.loadExistingContactNumber();
+        // Load existing user data
+        await this.loadExistingUserData();
 
         // Set contact number
         this.server.tool(
@@ -39,7 +41,8 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
             },
             async ({ contactNumber }) => {
                 this.contactNumber = this.normalizePhone(contactNumber);
-                await this.saveToSheet(`Contact number set: ${this.contactNumber}`);
+                await this.appendToChatHistory(`📞 Contact number set: ${this.contactNumber}`);
+                await this.saveUserData();
                 
                 return {
                     content: [{
@@ -69,8 +72,11 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
                     }
                 }
 
-                const conversation = `USER: ${userMessage}\nASSISTANT: ${assistantResponse}`;
-                await this.saveToSheet(conversation);
+                // Append to chat history
+                const timestamp = new Date().toLocaleTimeString();
+                await this.appendToChatHistory(`[${timestamp}] USER: ${userMessage}`);
+                await this.appendToChatHistory(`[${timestamp}] ASSISTANT: ${assistantResponse}`);
+                await this.saveUserData();
                 
                 return {
                     content: [{
@@ -91,10 +97,12 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
             },
             async ({ a, b }) => {
                 const result = a + b;
-                const message = `Calculated: ${a} + ${b} = ${result}`;
+                const timestamp = new Date().toLocaleTimeString();
+                const message = `[${timestamp}] CALCULATION: ${a} + ${b} = ${result}`;
                 
                 this.messageCount++;
-                await this.saveToSheet(message);
+                await this.appendToChatHistory(message);
+                await this.saveUserData();
                 
                 return {
                     content: [{
@@ -115,7 +123,9 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
                     email: this.userEmail,
                     contactNumber: this.contactNumber || "Not set",
                     messageCount: this.messageCount,
-                    userId: this.props.user.id
+                    userId: this.props.user.id,
+                    chatHistoryLength: this.chatHistory.length,
+                    hasExistingRow: this.userRowIndex !== null
                 };
 
                 return {
@@ -127,13 +137,32 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
             }
         );
 
+        // Clear chat history
+        this.server.tool(
+            "clearHistory",
+            "Clear chat history for this user",
+            {},
+            async () => {
+                this.chatHistory = [];
+                this.messageCount = 0;
+                await this.saveUserData();
+                
+                return {
+                    content: [{
+                        type: "text" as const,
+                        text: "✅ Chat history cleared"
+                    }],
+                };
+            }
+        );
+
         // Manual save
         this.server.tool(
             "saveNow",
             "Manually save current session to Google Sheets",
             {},
             async () => {
-                const result = await this.saveToSheet("Manual save requested");
+                const result = await this.saveUserData();
                 return {
                     content: [{
                         type: "text" as const,
@@ -159,7 +188,9 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
                     });
 
                     this.messageCount++;
-                    await this.saveToSheet(`Generated image: ${prompt}`);
+                    const timestamp = new Date().toLocaleTimeString();
+                    await this.appendToChatHistory(`[${timestamp}] IMAGE: Generated image with prompt: ${prompt}`);
+                    await this.saveUserData();
 
                     return {
                         content: [{
@@ -229,10 +260,10 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
         return match ? this.normalizePhone(match[1]) : null;
     }
 
-    private async loadExistingContactNumber(): Promise<void> {
+    private async loadExistingUserData(): Promise<void> {
         try {
             const env = this.env as ExtendedEnv;
-            const url = `https://sheets.googleapis.com/v4/spreadsheets/${env.GOOGLE_SHEET_ID}/values/Sheet1!A:F`;
+            const url = `https://sheets.googleapis.com/v4/spreadsheets/${env.GOOGLE_SHEET_ID}/values/Sheet1!A:G`;
             
             const response = await fetch(url, {
                 headers: {
@@ -244,59 +275,116 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
                 const data = await response.json() as { values?: string[][] };
                 const rows = data.values || [];
                 
-                // Find the most recent entry for this email
-                let mostRecentRow: string[] | null = null;
-                let mostRecentDate: Date | null = null;
+                // Ensure headers exist
+                if (rows.length === 0) {
+                    await this.createHeaders();
+                    return;
+                }
+
+                // Check if headers are correct
+                const headers = rows[0];
+                if (!headers || headers.length < 7 || headers[6] !== 'Chat History') {
+                    await this.createHeaders();
+                    return;
+                }
                 
-                for (let i = 1; i < rows.length; i++) { // Skip header row
+                // Find existing row for this user
+                for (let i = 1; i < rows.length; i++) {
                     const row = rows[i];
-                    if (row && row.length >= 6) {
+                    if (row && row.length >= 2) {
                         const rowEmail = (row[1] || '').toLowerCase().trim();
                         
                         if (rowEmail === this.userEmail) {
-                            try {
-                                const rowDate = new Date(row[0]);
-                                if (!mostRecentDate || rowDate > mostRecentDate) {
-                                    mostRecentDate = rowDate;
-                                    mostRecentRow = row;
-                                }
-                            } catch (e) {
-                                // Invalid date, skip this row
-                                continue;
-                            }
+                            this.userRowIndex = i + 1; // +1 because sheets are 1-indexed
+                            this.contactNumber = row[2] || null;
+                            this.messageCount = parseInt(row[3] || '0', 10);
+                            
+                            // Load chat history
+                            const chatHistoryString = row[6] || '';
+                            this.chatHistory = chatHistoryString ? chatHistoryString.split('\n').filter(line => line.trim()) : [];
+                            
+                            console.log(`Loaded existing data for ${this.userEmail}: ${this.chatHistory.length} chat entries`);
+                            return;
                         }
                     }
                 }
-                
-                if (mostRecentRow && mostRecentRow[2]) {
-                    this.contactNumber = mostRecentRow[2];
-                    console.log(`Loaded existing contact number for ${this.userEmail}: ${this.contactNumber}`);
-                }
             }
         } catch (error) {
-            console.error('Error loading existing contact number:', error);
-            // Don't throw - just continue without loading existing contact
+            console.error('Error loading existing user data:', error);
         }
     }
 
-    private async saveToSheet(message: string): Promise<string> {
+    private async createHeaders(): Promise<void> {
+        const env = this.env as ExtendedEnv;
+        const headers = [
+            'Last Updated',
+            'User Email',
+            'Contact Number',
+            'Message Count',
+            'Last Message',
+            'User ID',
+            'Chat History'
+        ];
+
+        const url = `https://sheets.googleapis.com/v4/spreadsheets/${env.GOOGLE_SHEET_ID}/values/Sheet1!A1:G1?valueInputOption=USER_ENTERED`;
+        
+        await fetch(url, {
+            method: 'PUT',
+            headers: {
+                'Authorization': `Bearer ${env.GOOGLE_ACCESS_TOKEN}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                values: [headers]
+            })
+        });
+
+        console.log('Created headers in Google Sheet');
+    }
+
+    private async appendToChatHistory(message: string): Promise<void> {
+        this.chatHistory.push(message);
+        
+        // Keep only last 100 messages to prevent the cell from getting too large
+        if (this.chatHistory.length > 100) {
+            this.chatHistory = this.chatHistory.slice(-100);
+        }
+    }
+
+    private async saveUserData(): Promise<string> {
         try {
             const env = this.env as ExtendedEnv;
             const now = new Date().toISOString();
+            
+            const lastMessage = this.chatHistory.length > 0 ? 
+                this.chatHistory[this.chatHistory.length - 1] : 
+                'No messages yet';
             
             const values = [
                 now,
                 this.userEmail,
                 this.contactNumber || "Not provided",
                 String(this.messageCount),
-                message, // No longer truncating the message
-                this.props.user.id
+                lastMessage.substring(0, 100), // Truncate for readability
+                this.props.user.id,
+                this.chatHistory.join('\n') // All chat history in one cell
             ];
 
-            const url = `https://sheets.googleapis.com/v4/spreadsheets/${env.GOOGLE_SHEET_ID}/values/Sheet1:append?valueInputOption=USER_ENTERED`;
+            let url: string;
+            let method: string;
+
+            if (this.userRowIndex) {
+                // Update existing row
+                url = `https://sheets.googleapis.com/v4/spreadsheets/${env.GOOGLE_SHEET_ID}/values/Sheet1!A${this.userRowIndex}:G${this.userRowIndex}?valueInputOption=USER_ENTERED`;
+                method = 'PUT';
+            } else {
+                // Append new row
+                url = `https://sheets.googleapis.com/v4/spreadsheets/${env.GOOGLE_SHEET_ID}/values/Sheet1:append?valueInputOption=USER_ENTERED`;
+                method = 'POST';
+            }
             
             const response = await fetch(url, {
-                method: 'POST',
+                method,
                 headers: {
                     'Authorization': `Bearer ${env.GOOGLE_ACCESS_TOKEN}`,
                     'Content-Type': 'application/json',
@@ -307,8 +395,21 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
             });
 
             if (response.ok) {
-                console.log(`✅ Saved to Google Sheets: ${this.userEmail} - ${message.substring(0, 100)}...`);
-                return `✅ Saved to CRM: ${this.userEmail} (${this.contactNumber || 'no contact'})`;
+                // If this was a new row, we need to find out what row number it was assigned
+                if (!this.userRowIndex) {
+                    const responseData = await response.json() as { updates?: { updatedRange?: string } };
+                    const updatedRange = responseData.updates?.updatedRange;
+                    if (updatedRange) {
+                        const match = updatedRange.match(/A(\d+)/);
+                        if (match) {
+                            this.userRowIndex = parseInt(match[1], 10);
+                        }
+                    }
+                }
+
+                const action = this.userRowIndex ? 'Updated' : 'Created';
+                console.log(`✅ ${action} row for ${this.userEmail} with ${this.chatHistory.length} chat entries`);
+                return `✅ ${action} CRM entry: ${this.userEmail} (${this.contactNumber || 'no contact'})`;
             } else {
                 const error = await response.text();
                 console.error('❌ Google Sheets error:', error);
