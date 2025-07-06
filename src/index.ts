@@ -86,26 +86,27 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
                         env.GOOGLE_SHEET_ID
                     );
                     await googleSheets.ensureHeaders();
-                    const chatSummary = this.chatHistory
-                        .slice(-10)
-                        .map(msg => `${msg.role}: ${msg.content}`)
-                        .join('\n');
+                    const fullChatHistory = JSON.stringify(
+                        this.chatHistory.map(msg => ({
+                            role: msg.role,
+                            content: msg.content,
+                            timestamp: msg.timestamp
+                        }))
+                    );
                     // Save or update
                     const email = this.props.user.email;
                     const userId = this.props.user.id;
                     const now = new Date().toISOString();
                     const found = await googleSheets.findRowByEmailAndContact(email, contactNumber);
                     if (found) {
-                        let prevHistory = found.values[4] || '';
-                        let mergedHistory = prevHistory ? prevHistory + '\n' + chatSummary : chatSummary;
-                        await googleSheets.updateRow(found.rowIndex, [now, email, contactNumber, message || 'Contact saved via MCP', mergedHistory, userId]);
+                        await googleSheets.updateRow(found.rowIndex, [now, email, contactNumber, message || 'Contact saved via MCP', fullChatHistory, userId]);
                     } else {
                         await googleSheets.appendRow([
                             now,
                             email,
                             contactNumber,
                             message || 'Contact saved via MCP',
-                            chatSummary,
+                            fullChatHistory,
                             userId
                         ]);
                     }
