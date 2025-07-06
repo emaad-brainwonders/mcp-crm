@@ -61,6 +61,7 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
             async ({ contactNumber }: { contactNumber: string }) => {
                 this.userContactNumber = contactNumber;
                 await this.pushUserReply(`Contact number provided: ${contactNumber}`);
+                await this.pushUserReply(`saveContact(${contactNumber}, ${message || 'no message'})`);
                 await this.pushAssistantReply('Contact number saved for this session');
                 return {
                     content: [{
@@ -342,7 +343,6 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
             content,
             timestamp: new Date()
         });
-        await this.saveNewChatLinesToSheet();
     }
 
     /**
@@ -369,6 +369,12 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
             [now, sessionSummary, userId]
         );
         this.lastChatIndexSaved = this.chatHistory.length;
+    }
+
+    // Example handler for user input
+    async onUserMessage(userInput: string) {
+        await this.pushUserReply(userInput); // userInput is the actual message from the user
+        // ...then process the message, call tools, etc.
     }
 }
 
