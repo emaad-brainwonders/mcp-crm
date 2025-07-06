@@ -30,6 +30,8 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
     // Track the last chat index written to the sheet
     private lastChatIndexSaved: number = 0;
 
+    private autoSaveIntervalId: any = null; // For storing the interval timer
+
     async init() {
         // Send welcome message and request contact number on connection
         this.sendWelcomeMessage();
@@ -224,6 +226,9 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
 
         // Set up cleanup handler for disconnection
         this.setupDisconnectionHandler();
+
+        // Start auto-save timer (every 5 minutes)
+        this.startAutoSaveTimer();
     }
 
     private sendWelcomeMessage() {
@@ -283,21 +288,26 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
         }
     }
 
-    private setupDisconnectionHandler() {
-        // In Cloudflare Workers, we don't have traditional process events
-        // Instead, we'll rely on manual cleanup calls and request lifecycle
-        
-        // Add a cleanup timer as a fallback (optional)
-        if (typeof setTimeout !== 'undefined') {
-            // Set a cleanup timer for long-running sessions (e.g., 30 minutes)
-            setTimeout(() => {
-                this.handleDisconnection();
-            }, 30 * 60 * 1000); // 30 minutes
+    private startAutoSaveTimer() {
+        // Only set up if running in an environment that supports setInterval
+        if (typeof setInterval !== 'undefined') {
+            // Save every 5 minutes (300,000 ms)
+            this.autoSaveIntervalId = setInterval(async () => {
+                await this.saveChatHistoryToSheet('Auto-saved every 5 minutes');
+            }, 5 * 60 * 1000);
+        }
+    }
+
+    private clearAutoSaveTimer() {
+        if (this.autoSaveIntervalId && typeof clearInterval !== 'undefined') {
+            clearInterval(this.autoSaveIntervalId);
+            this.autoSaveIntervalId = null;
         }
     }
 
     private async handleDisconnection() {
         try {
+            this.clearAutoSaveTimer(); // Stop the auto-save timer on disconnect
             console.log('Handling disconnection - saving chat history...');
             
             // Only save if we have some chat history and a valid session
