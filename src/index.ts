@@ -46,11 +46,22 @@ function isSessionState(data: unknown): data is SessionState {
     );
 }
 
+// Type for storage operations
+interface Storage {
+    get(key: string): Promise<unknown>;
+    put(key: string, value: unknown): Promise<void>;
+}
+
 export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
     server = new McpServer({
         name: "MCP CRM Chat Assistant",
         version: "2.0.0",
     });
+
+    // Type assertion helper for storage
+    private get storage(): Storage {
+        return this.state.storage as Storage;
+    }
 
     // Use a key to store/retrieve session state
     private getSessionKey(): string {
@@ -60,7 +71,7 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
     // Get session state from storage or create new one
     private async getSessionState(): Promise<SessionState> {
         const key = this.getSessionKey();
-        const stored = await this.state.storage.get(key);
+        const stored = await this.storage.get(key);
         
         if (isSessionState(stored)) {
             return stored;
@@ -75,14 +86,14 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
             lastSavedMessageIndex: 0
         };
         
-        await this.state.storage.put(key, newState);
+        await this.storage.put(key, newState);
         return newState;
     }
 
     // Save session state to storage
     private async saveSessionState(state: SessionState): Promise<void> {
         const key = this.getSessionKey();
-        await this.state.storage.put(key, state);
+        await this.storage.put(key, state);
     }
 
     async init() {
