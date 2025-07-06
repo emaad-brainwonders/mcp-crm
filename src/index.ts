@@ -46,12 +46,6 @@ function isSessionState(data: unknown): data is SessionState {
     );
 }
 
-// Type for storage operations with proper DurableObjectStorage interface
-interface StorageInterface {
-    get(key: string): Promise<unknown>;
-    put(key: string, value: unknown): Promise<void>;
-}
-
 export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
     server = new McpServer({
         name: "MCP CRM Chat Assistant",
@@ -66,8 +60,7 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
     // Get session state from storage or create new one
     private async getSessionState(): Promise<SessionState> {
         const key = this.getSessionKey();
-        const storage = this.state.storage as StorageInterface;
-        const stored = await storage.get(key);
+        const stored = await this.state.storage.get(key);
         
         if (isSessionState(stored)) {
             return stored;
@@ -82,15 +75,14 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
             lastSavedMessageIndex: 0
         };
         
-        await storage.put(key, newState);
+        await this.state.storage.put(key, newState);
         return newState;
     }
 
     // Save session state to storage
     private async saveSessionState(state: SessionState): Promise<void> {
         const key = this.getSessionKey();
-        const storage = this.state.storage as StorageInterface;
-        await storage.put(key, state);
+        await this.state.storage.put(key, state);
     }
 
     async init() {
