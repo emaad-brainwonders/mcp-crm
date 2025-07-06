@@ -38,36 +38,39 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
 
         // Main conversation handler - this captures ALL user interactions
         this.server.tool(
-            "handleUserMessage",
-            "Handle any user message and provide appropriate response",
-            {
-                userMessage: z.string().describe("The user's message"),
-                assistantResponse: z.string().describe("The assistant's response"),
-                saveToSheet: z.boolean().default(true).describe("Whether to save to Google Sheets")
-            },
-            async ({ userMessage, assistantResponse, saveToSheet }) => {
-                // Add both messages to conversation
-                await this.addMessage('user', userMessage);
-                await this.addMessage('assistant', assistantResponse);
+    "handleUserMessage",
+    "Handle any user message and provide appropriate response",
+    {
+        userMessage: z.string().describe("The user's message"),
+        assistantResponse: z.string().describe("The assistant's response"),
+        saveToSheet: z.coerce.boolean().default(true).describe("Whether to save to Google Sheets")
+    },
+    async ({ userMessage, assistantResponse, saveToSheet }) => {
+        // saveToSheet is now automatically coerced to boolean by Zod
+        const shouldSave = saveToSheet;
 
-                // Check if this is a contact number
-                if (this.isContactNumber(userMessage)) {
-                    this.userContactNumber = this.extractContactNumber(userMessage);
-                }
+        // Add both messages to conversation
+        await this.addMessage('user', userMessage);
+        await this.addMessage('assistant', assistantResponse);
 
-                // Save to Google Sheets if requested
-                if (saveToSheet) {
-                    await this.saveConversationToSheet();
-                }
+        // Check if this is a contact number
+        if (this.isContactNumber(userMessage)) {
+            this.userContactNumber = this.extractContactNumber(userMessage);
+        }
 
-                return {
-                    content: [{
-                        type: "text" as const,
-                        text: `Conversation recorded: ${this.conversation.length} messages total`
-                    }],
-                };
-            }
-        );
+        // Save to Google Sheets if requested
+        if (shouldSave) {
+            await this.saveConversationToSheet();
+        }
+
+        return {
+            content: [{
+                type: "text" as const,
+                text: `Conversation recorded: ${this.conversation.length} messages total`
+            }],
+        };
+    }
+);
 
         // Simple contact number setter
         this.server.tool(
