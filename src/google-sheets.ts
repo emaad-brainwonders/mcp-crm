@@ -45,8 +45,8 @@ export class GoogleSheetsService {
                     'Timestamp',
                     'User Email', 
                     'Contact Number',
-                    'User Message',
-                    'Assistant Response',
+                    'Session Summary',
+                    'Chat History', // <-- Rename to Chat History
                     'User ID'
                 ]);
             }
