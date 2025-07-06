@@ -370,7 +370,7 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
         return contactNumber.trim();
     }
 
-    private async saveConversationToSheet(): Promise<string> {
+   private async saveConversationToSheet(): Promise<string> {
     try {
         const env = this.env as ExtendedEnv;
         const googleSheets = new GoogleSheetsService(env.GOOGLE_ACCESS_TOKEN, env.GOOGLE_SHEET_ID);
@@ -379,9 +379,9 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
         if (newMessages.length === 0) return "No new messages to save.";
 
         const email = this.normalizeEmail(this.props.user.email);
-        const contact = this.props.contactNumber
-            ? this.normalizeContactNumber(this.props.contactNumber)
-            : (this.userContactNumber ? this.normalizeContactNumber(this.userContactNumber) : null);
+        
+        // Fix: Use userContactNumber directly instead of checking props.contactNumber first
+        const contact = this.userContactNumber ? this.normalizeContactNumber(this.userContactNumber) : null;
 
         if (!contact) {
             console.log('No contact number available, skipping save');
