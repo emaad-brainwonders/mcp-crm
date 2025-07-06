@@ -247,10 +247,12 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
             await googleSheets.ensureHeaders();
 
             // Only include user messages
-            const userChatHistory = this.chatHistory
-                .filter(msg => msg.role === 'user')
-                .map(msg => `[${msg.timestamp.toISOString()}] user: ${msg.content}`)
-                .join('\n');
+            const userChatHistory = JSON.stringify(
+                this.chatHistory.filter(msg => msg.role === 'user').map(msg => ({
+                    role: msg.role,
+                    content: msg.content
+                }))
+            );
 
             const sessionDuration = new Date().getTime() - this.connectionStartTime.getTime();
             const durationMinutes = Math.round(sessionDuration / (1000 * 60));
