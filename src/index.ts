@@ -38,39 +38,37 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
 
         // Main conversation handler - this captures ALL user interactions
         this.server.tool(
-    "handleUserMessage",
-    "Handle any user message and provide appropriate response",
-    {
-        userMessage: z.string().describe("The user's message"),
-        assistantResponse: z.string().describe("The assistant's response"),
-        saveToSheet: z.coerce.boolean().default(true).describe("Whether to save to Google Sheets")
-    },
-    async ({ userMessage, assistantResponse, saveToSheet }) => {
-        // saveToSheet is now automatically coerced to boolean by Zod
-        const shouldSave = saveToSheet;
+            "handleUserMessage",
+            "Handle any user message and provide appropriate response",
+            {
+                userMessage: z.string().describe("The user's message"),
+                assistantResponse: z.string().describe("The assistant's response"),
+                saveToSheet: z.coerce.boolean().default(true).describe("Whether to save to Google Sheets")
+            },
+            async ({ userMessage, assistantResponse, saveToSheet }) => {
+                // Add both messages to conversation
+                await this.addMessage('user', userMessage);
+                await this.addMessage('assistant', assistantResponse);
 
-        // Add both messages to conversation
-        await this.addMessage('user', userMessage);
-        await this.addMessage('assistant', assistantResponse);
+                // Check if this is a contact number
+                if (this.isContactNumber(userMessage)) {
+                    this.userContactNumber = this.extractContactNumber(userMessage);
+                    console.log(`Contact number extracted: ${this.userContactNumber}`);
+                }
 
-        // Check if this is a contact number
-        if (this.isContactNumber(userMessage)) {
-            this.userContactNumber = this.extractContactNumber(userMessage);
-        }
+                // Save to Google Sheets if requested
+                if (saveToSheet) {
+                    await this.saveConversationToSheet();
+                }
 
-        // Save to Google Sheets if requested
-        if (shouldSave) {
-            await this.saveConversationToSheet();
-        }
-
-        return {
-            content: [{
-                type: "text" as const,
-                text: `Conversation recorded: ${this.conversation.length} messages total`
-            }],
-        };
-    }
-);
+                return {
+                    content: [{
+                        type: "text" as const,
+                        text: `Conversation recorded: ${this.conversation.length} messages total. Contact: ${this.userContactNumber || 'Not set'}`
+                    }],
+                };
+            }
+        );
 
         // Simple contact number setter
         this.server.tool(
@@ -80,20 +78,20 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
                 contactNumber: z.string().describe("User's contact number")
             },
             async ({ contactNumber }) => {
-                this.userContactNumber = contactNumber;
-                await this.addMessage('assistant', `Contact number ${contactNumber} saved successfully.`);
+                this.userContactNumber = this.normalizeContactNumber(contactNumber);
+                await this.addMessage('assistant', `Contact number ${this.userContactNumber} saved successfully.`);
                 await this.saveConversationToSheet();
                 
                 return {
                     content: [{
                         type: "text" as const,
-                        text: `Contact number ${contactNumber} has been saved.`
+                        text: `Contact number ${this.userContactNumber} has been saved.`
                     }],
                 };
             }
         );
 
-        // Batch conversation import (for the conversation history you provided)
+        // Batch conversation import
         this.server.tool(
             "importConversationHistory",
             "Import existing conversation history from a previous session",
@@ -117,6 +115,7 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
                 for (const msg of messages) {
                     if (msg.role === 'user' && this.isContactNumber(msg.content)) {
                         this.userContactNumber = this.extractContactNumber(msg.content);
+                        console.log(`Contact number found in import: ${this.userContactNumber}`);
                         break;
                     }
                 }
@@ -149,7 +148,7 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
             }
         );
 
-        // Session status
+        // Enhanced session status
         this.server.tool(
             "getSessionStatus",
             "Get current session status and conversation info",
@@ -160,7 +159,9 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
                     totalMessages: this.conversation.length,
                     unsavedMessages: this.conversation.length - this.lastSavedMessageIndex,
                     contactNumber: this.userContactNumber || 'Not set',
+                    normalizedContact: this.userContactNumber ? this.normalizeContactNumber(this.userContactNumber) : 'N/A',
                     userEmail: this.props.user.email,
+                    normalizedEmail: this.normalizeEmail(this.props.user.email),
                     lastSaved: this.lastSaveTime
                 };
 
@@ -170,6 +171,93 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
                         text: JSON.stringify(status, null, 2)
                     }],
                 };
+            }
+        );
+
+        // Enhanced debug tool
+        this.server.tool(
+            "debugGoogleSheets",
+            "Debug Google Sheets to see all rows and identify issues",
+            {},
+            async () => {
+                try {
+                    const env = this.env as ExtendedEnv;
+                    const googleSheets = new GoogleSheetsService(env.GOOGLE_ACCESS_TOKEN, env.GOOGLE_SHEET_ID);
+                    
+                    // Debug all rows
+                    await googleSheets.debugAllRows();
+                    
+                    // Get unique pairs
+                    const pairs = await googleSheets.getUniqueEmailContactPairs();
+                    console.log('Unique email-contact pairs in sheet:', pairs);
+                    
+                    // Test the find function
+                    const email = this.normalizeEmail(this.props.user.email);
+                    const contact = this.userContactNumber ? this.normalizeContactNumber(this.userContactNumber) : 'Not provided';
+                    
+                    console.log(`Testing find function for: "${email}" + "${contact}"`);
+                    const result = await googleSheets.findRowByEmailAndContact(email, contact);
+                    console.log('Find result:', result);
+                    
+                    return {
+                        content: [{
+                            type: "text" as const,
+                            text: `Debug complete. Found ${pairs.length} unique pairs. Current user: ${email}, Contact: ${contact}. Check console for details.`
+                        }],
+                    };
+                } catch (error) {
+                    console.error('Debug error:', error);
+                    return {
+                        content: [{
+                            type: "text" as const,
+                            text: `Debug error: ${error instanceof Error ? error.message : 'Unknown error'}`
+                        }],
+                    };
+                }
+            }
+        );
+
+        // Enhanced test save function
+        this.server.tool(
+            "testSaveFunction",
+            "Test the save function with specific parameters",
+            {
+                email: z.string().describe("Email to test with"),
+                contactNumber: z.string().describe("Contact number to test with"),
+                testMessage: z.string().describe("Test message to save")
+            },
+            async ({ email, contactNumber, testMessage }) => {
+                try {
+                    const env = this.env as ExtendedEnv;
+                    const googleSheets = new GoogleSheetsService(env.GOOGLE_ACCESS_TOKEN, env.GOOGLE_SHEET_ID);
+                    
+                    const now = new Date().toISOString();
+                    const testChatLines = [`[${now}] TEST: ${testMessage}`];
+                    const otherValues = [now, `Test message: ${testMessage}`, this.props.user.id];
+                    
+                    // Normalize inputs before testing
+                    const normalizedEmail = this.normalizeEmail(email);
+                    const normalizedContact = this.normalizeContactNumber(contactNumber);
+                    
+                    console.log(`Testing save with normalized values: Email="${normalizedEmail}", Contact="${normalizedContact}"`);
+                    
+                    await googleSheets.appendChatLinesToRow(normalizedEmail, normalizedContact, testChatLines, otherValues);
+                    
+                    return {
+                        content: [{
+                            type: "text" as const,
+                            text: `Test save completed for ${normalizedEmail} / ${normalizedContact}`
+                        }],
+                    };
+                } catch (error) {
+                    console.error('Test save error:', error);
+                    return {
+                        content: [{
+                            type: "text" as const,
+                            text: `Test save error: ${error instanceof Error ? error.message : 'Unknown error'}`
+                        }],
+                    };
+                }
             }
         );
 
@@ -191,81 +279,6 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
                 };
             }
         );
-        this.server.tool(
-    "debugGoogleSheets",
-    "Debug Google Sheets to see all rows and identify issues",
-    {},
-    async () => {
-        try {
-            const env = this.env as ExtendedEnv;
-            const googleSheets = new GoogleSheetsService(env.GOOGLE_ACCESS_TOKEN, env.GOOGLE_SHEET_ID);
-            
-            // This will log all rows to the console
-            await googleSheets.debugAllRows();
-            
-            // Also test the find function
-            const email = this.props.user.email;
-            const contact = this.userContactNumber || 'Not provided';
-            
-            console.log(`Testing find function for: ${email}, ${contact}`);
-            const result = await googleSheets.findRowByEmailAndContact(email, contact);
-            console.log('Find result:', result);
-            
-            return {
-                content: [{
-                    type: "text" as const,
-                    text: `Debug complete. Check console logs for details. Current user: ${email}, Contact: ${contact}`
-                }],
-            };
-        } catch (error) {
-            console.error('Debug error:', error);
-            return {
-                content: [{
-                    type: "text" as const,
-                    text: `Debug error: ${error instanceof Error ? error.message : 'Unknown error'}`
-                }],
-            };
-        }
-    }
-);
-
-// Also add a tool to manually test the save function
-this.server.tool(
-    "testSaveFunction",
-    "Test the save function with specific parameters",
-    {
-        email: z.string().describe("Email to test with"),
-        contactNumber: z.string().describe("Contact number to test with"),
-        testMessage: z.string().describe("Test message to save")
-    },
-    async ({ email, contactNumber, testMessage }) => {
-        try {
-            const env = this.env as ExtendedEnv;
-            const googleSheets = new GoogleSheetsService(env.GOOGLE_ACCESS_TOKEN, env.GOOGLE_SHEET_ID);
-            
-            const now = new Date().toISOString();
-            const testChatLines = [`[${now}] TEST: ${testMessage}`];
-            const otherValues = [now, `Test message: ${testMessage}`, this.props.user.id];
-            
-            await googleSheets.appendChatLinesToRow(email, contactNumber, testChatLines, otherValues);
-            
-            return {
-                content: [{
-                    type: "text" as const,
-                    text: `Test save completed for ${email} / ${contactNumber}`
-                }],
-            };
-        } catch (error) {
-            console.error('Test save error:', error);
-            return {
-                content: [{
-                    type: "text" as const,
-                    text: `Test save error: ${error instanceof Error ? error.message : 'Unknown error'}`
-                }],
-            };
-        }
-    }
-);
 
         // Image generation (if user has permission)
         if (this.props.permissions.includes("image_generation")) {
@@ -318,14 +331,43 @@ this.server.tool(
 
     private isContactNumber(message: string): boolean {
         // Check if message contains a phone number pattern
-        const phonePattern = /\b\d{10}\b/;
-        return phonePattern.test(message) || message.toLowerCase().includes('contact') || message.toLowerCase().includes('phone');
+        const phonePattern = /\b\d{10,11}\b/;
+        return phonePattern.test(message) || 
+               message.toLowerCase().includes('contact') || 
+               message.toLowerCase().includes('phone') ||
+               message.toLowerCase().includes('number');
     }
 
     private extractContactNumber(message: string): string {
-        // Extract 10-digit number from message
-        const match = message.match(/\b(\d{10})\b/);
-        return match ? match[1] : message.replace(/\D/g, '').slice(0, 10);
+        // First try to extract a 10 or 11 digit number
+        const match = message.match(/\b(\d{10,11})\b/);
+        if (match) {
+            return this.normalizeContactNumber(match[1]);
+        }
+        
+        // Fallback: extract all digits and take up to 11 characters
+        const digitsOnly = message.replace(/\D/g, '');
+        return this.normalizeContactNumber(digitsOnly.slice(0, 11));
+    }
+
+    private normalizeEmail(email: string): string {
+        return email.trim().toLowerCase();
+    }
+
+    private normalizeContactNumber(contactNumber: string): string {
+        // Remove all non-digit characters
+        const digitsOnly = contactNumber.replace(/\D/g, '');
+        
+        // Handle different formats
+        if (digitsOnly.length === 11 && digitsOnly.startsWith('1')) {
+            return digitsOnly.substring(1); // Remove country code
+        }
+        if (digitsOnly.length === 10) {
+            return digitsOnly;
+        }
+        
+        // Return as-is if it doesn't match expected patterns
+        return contactNumber.trim();
     }
 
     private async saveConversationToSheet(): Promise<string> {
@@ -340,16 +382,25 @@ this.server.tool(
                 return "No new messages to save.";
             }
 
+            // Validate required data
+            const email = this.normalizeEmail(this.props.user.email);
+            const contact = this.userContactNumber ? this.normalizeContactNumber(this.userContactNumber) : null;
+            
+            if (!contact) {
+                console.log('No contact number available, skipping save');
+                return "Contact number not provided. Please set contact number first.";
+            }
+
             // Format only the new messages
             const newChatLines = newMessages.map(msg => 
                 `[${msg.timestamp}] ${msg.role.toUpperCase()}: ${msg.content}`
             );
 
-            const email = this.props.user.email;
-            const contact = this.userContactNumber || 'Not provided';
             const userId = this.props.user.id;
             const now = new Date().toISOString();
             const summary = `Session: ${this.conversation.length} messages total, Latest: ${newMessages.length} new messages`;
+
+            console.log(`Saving to sheet: Email="${email}", Contact="${contact}"`);
 
             // Use the appendChatLinesToRow method to append only new messages
             await googleSheets.appendChatLinesToRow(
@@ -363,7 +414,7 @@ this.server.tool(
             this.lastSavedMessageIndex = this.conversation.length;
             this.lastSaveTime = now;
 
-            return `Successfully appended ${newMessages.length} new messages to Google Sheets! Total: ${this.conversation.length} messages, Contact: ${contact}`;
+            return `Successfully saved ${newMessages.length} new messages to Google Sheets! Total: ${this.conversation.length} messages, Email: ${email}, Contact: ${contact}`;
 
         } catch (error) {
             console.error('Error saving to Google Sheets:', error);
