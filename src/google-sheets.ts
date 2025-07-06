@@ -53,6 +53,26 @@ export class GoogleSheetsService {
         }
     }
 
+    private normalizeEmail(email: string): string {
+        return email.trim().toLowerCase();
+    }
+
+    private normalizeContactNumber(contactNumber: string): string {
+        // Remove all non-digit characters and normalize
+        const digitsOnly = contactNumber.replace(/\D/g, '');
+        
+        // Handle different formats (e.g., +1234567890, 1234567890, etc.)
+        if (digitsOnly.length === 11 && digitsOnly.startsWith('1')) {
+            return digitsOnly.substring(1); // Remove country code
+        }
+        if (digitsOnly.length === 10) {
+            return digitsOnly;
+        }
+        
+        // Return as-is if it doesn't match expected patterns
+        return contactNumber.trim();
+    }
+
     async findRowByEmailAndContact(email: string, contactNumber: string): Promise<{ rowIndex: number, values: string[] } | null> {
         const url = `https://sheets.googleapis.com/v4/spreadsheets/${this.sheetId}/values/Sheet1!A2:F1000`;
         const response = await fetch(url, {
@@ -67,28 +87,34 @@ export class GoogleSheetsService {
         }
         
         const data = await response.json() as { values?: string[][] };
-        if (!data.values) return null;
+        if (!data.values) {
+            console.log('No data found in sheet');
+            return null;
+        }
         
-        // Clean the inputs for comparison
-        const cleanEmail = email.trim().toLowerCase();
-        const cleanContact = contactNumber.trim();
+        // Normalize the search criteria
+        const normalizedEmail = this.normalizeEmail(email);
+        const normalizedContact = this.normalizeContactNumber(contactNumber);
         
-        console.log(`Looking for: Email="${cleanEmail}", Contact="${cleanContact}"`);
+        console.log(`Searching for - Email: "${normalizedEmail}", Contact: "${normalizedContact}"`);
         
         for (let i = 0; i < data.values.length; i++) {
             const row = data.values[i];
-            const rowEmail = (row[1] || '').trim().toLowerCase();
-            const rowContact = (row[2] || '').trim();
+            if (!row || row.length < 3) continue; // Skip incomplete rows
+            
+            const rowEmail = this.normalizeEmail(row[1] || '');
+            const rowContact = this.normalizeContactNumber(row[2] || '');
             
             console.log(`Row ${i + 2}: Email="${rowEmail}", Contact="${rowContact}"`);
             
-            if (rowEmail === cleanEmail && rowContact === cleanContact) {
-                console.log(`Found match at row ${i + 2}`);
+            // Check if both email and contact match
+            if (rowEmail === normalizedEmail && rowContact === normalizedContact) {
+                console.log(`Found exact match at row ${i + 2}`);
                 return { rowIndex: i + 2, values: row }; // +2 because A2 is row 2
             }
         }
         
-        console.log('No match found');
+        console.log('No matching row found for both email and contact');
         return null;
     }
 
@@ -111,10 +137,13 @@ export class GoogleSheetsService {
             const error = await response.text();
             throw new Error(`Failed to update Google Sheet: ${error}`);
         }
+        
+        console.log(`Successfully updated row ${rowIndex}`);
     }
 
     /**
-     * Appends only new chat lines to the existing chat history cell.
+     * Appends only new chat lines to the existing chat history cell for rows matching both email and contact.
+     * If no matching row is found, creates a new row.
      * @param email User email
      * @param contactNumber User contact number
      * @param newChatLines Array of new chat lines to append
@@ -123,42 +152,58 @@ export class GoogleSheetsService {
     async appendChatLinesToRow(email: string, contactNumber: string, newChatLines: string[], otherValues: string[]): Promise<void> {
         console.log(`Attempting to append chat for Email: "${email}", Contact: "${contactNumber}"`);
         
+        // Ensure we have valid inputs
+        if (!email || !contactNumber) {
+            console.error('Email or contact number is missing');
+            throw new Error('Both email and contact number are required');
+        }
+        
+        if (!newChatLines || newChatLines.length === 0) {
+            console.log('No new chat lines to append');
+            return;
+        }
+        
         const found = await this.findRowByEmailAndContact(email, contactNumber);
         
         if (found) {
-            console.log(`Found existing row, updating...`);
-            // Only append new lines to the chat history cell (column 5, index 4)
-            let prevHistory = found.values[4] || '';
-            let mergedHistory = prevHistory;
+            console.log(`Found existing row ${found.rowIndex}, updating with new chat lines...`);
             
-            if (newChatLines.length > 0) {
-                mergedHistory = prevHistory ? prevHistory + '\n' + newChatLines.join('\n') : newChatLines.join('\n');
-            }
+            // Get existing chat history (column 5, index 4)
+            const existingChatHistory = found.values[4] || '';
             
+            // Append new chat lines
+            const updatedChatHistory = existingChatHistory 
+                ? existingChatHistory + '\n' + newChatLines.join('\n')
+                : newChatLines.join('\n');
+            
+            // Update the row with new data
             // otherValues: [timestamp, summary, userId]
-            await this.updateRow(found.rowIndex, [
+            const updatedRow = [
                 otherValues[0], // timestamp
                 email, 
                 contactNumber, 
                 otherValues[1], // summary
-                mergedHistory, 
+                updatedChatHistory, 
                 otherValues[2] // userId
-            ]);
+            ];
             
+            await this.updateRow(found.rowIndex, updatedRow);
             console.log(`Successfully updated existing row ${found.rowIndex}`);
         } else {
-            console.log(`No existing row found, creating new row...`);
-            // If not found, create new row with just the new chat lines
-            await this.appendRow([
+            console.log(`No existing row found for email "${email}" and contact "${contactNumber}", creating new row...`);
+            
+            // Create new row
+            const newRow = [
                 otherValues[0], // timestamp
                 email,
                 contactNumber,
                 otherValues[1], // summary
                 newChatLines.join('\n'), // chat history
                 otherValues[2] // userId
-            ]);
+            ];
             
-            console.log(`Successfully created new row`);
+            await this.appendRow(newRow);
+            console.log(`Successfully created new row for email "${email}" and contact "${contactNumber}"`);
         }
     }
 
@@ -178,9 +223,59 @@ export class GoogleSheetsService {
             if (data.values) {
                 console.log('All rows in sheet:');
                 data.values.forEach((row, index) => {
-                    console.log(`Row ${index + 1}:`, row);
+                    if (index === 0) {
+                        console.log(`Row ${index + 1} (Header):`, row);
+                    } else {
+                        const email = this.normalizeEmail(row[1] || '');
+                        const contact = this.normalizeContactNumber(row[2] || '');
+                        console.log(`Row ${index + 1}: Email="${email}", Contact="${contact}", Raw:`, row);
+                    }
+                });
+            } else {
+                console.log('No data found in sheet');
+            }
+        } else {
+            console.error('Failed to fetch debug data:', await response.text());
+        }
+    }
+
+    /**
+     * Get all unique email-contact combinations in the sheet
+     */
+    async getUniqueEmailContactPairs(): Promise<Array<{email: string, contact: string, rowIndex: number}>> {
+        const url = `https://sheets.googleapis.com/v4/spreadsheets/${this.sheetId}/values/Sheet1!A2:F1000`;
+        const response = await fetch(url, {
+            headers: {
+                'Authorization': `Bearer ${this.accessToken}`,
+            }
+        });
+        
+        if (!response.ok) {
+            console.error('Failed to fetch rows:', await response.text());
+            return [];
+        }
+        
+        const data = await response.json() as { values?: string[][] };
+        if (!data.values) return [];
+        
+        const pairs: Array<{email: string, contact: string, rowIndex: number}> = [];
+        
+        for (let i = 0; i < data.values.length; i++) {
+            const row = data.values[i];
+            if (!row || row.length < 3) continue;
+            
+            const email = this.normalizeEmail(row[1] || '');
+            const contact = this.normalizeContactNumber(row[2] || '');
+            
+            if (email && contact) {
+                pairs.push({
+                    email,
+                    contact,
+                    rowIndex: i + 2 // +2 because A2 is row 2
                 });
             }
         }
+        
+        return pairs;
     }
 }
