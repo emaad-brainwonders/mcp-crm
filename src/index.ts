@@ -246,13 +246,15 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
 
             await googleSheets.ensureHeaders();
 
-            const fullChatHistory = this.chatHistory
-                .map(msg => `[${msg.timestamp.toISOString()}] ${msg.role}: ${msg.content}`)
+            // Only include user messages
+            const userChatHistory = this.chatHistory
+                .filter(msg => msg.role === 'user')
+                .map(msg => `[${msg.timestamp.toISOString()}] user: ${msg.content}`)
                 .join('\n');
 
             const sessionDuration = new Date().getTime() - this.connectionStartTime.getTime();
             const durationMinutes = Math.round(sessionDuration / (1000 * 60));
-            const sessionSummary = summary || `Chat session - Duration: ${durationMinutes} minutes, Messages: ${this.chatHistory.length}`;
+            const sessionSummary = summary || `Chat session - Duration: ${durationMinutes} minutes, User Messages: ${this.chatHistory.filter(msg => msg.role === 'user').length}`;
 
             const email = this.props.user.email;
             const contact = this.userContactNumber || 'Not provided';
@@ -264,16 +266,16 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
             if (found) {
                 // Merge chat history
                 let prevHistory = found.values[4] || '';
-                let mergedHistory = prevHistory ? prevHistory + '\n' + fullChatHistory : fullChatHistory;
+                let mergedHistory = prevHistory ? prevHistory + '\n' + userChatHistory : userChatHistory;
                 await googleSheets.updateRow(found.rowIndex, [now, email, contact, sessionSummary, mergedHistory, userId]);
             } else {
-                await googleSheets.appendRow([now, email, contact, sessionSummary, fullChatHistory, userId]);
+                await googleSheets.appendRow([now, email, contact, sessionSummary, userChatHistory, userId]);
             }
 
             return {
                 content: [{
                     type: "text" as const,
-                    text: `Chat history saved successfully!\n\nSession Summary:\n- Duration: ${durationMinutes} minutes\n- Messages: ${this.chatHistory.length}\n- User: ${email}\n- Contact: ${contact}`
+                    text: `User chat history saved successfully!\n\nSession Summary:\n- Duration: ${durationMinutes} minutes\n- User Messages: ${this.chatHistory.filter(msg => msg.role === 'user').length}\n- User: ${email}\n- Contact: ${contact}`
                 }],
             };
         } catch (error) {
