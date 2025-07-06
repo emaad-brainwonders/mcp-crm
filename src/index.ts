@@ -28,6 +28,24 @@ interface SessionState {
     lastSavedMessageIndex: number;
 }
 
+// Type guard to check if the stored data is a valid SessionState
+function isSessionState(data: unknown): data is SessionState {
+    return (
+        typeof data === 'object' &&
+        data !== null &&
+        'conversation' in data &&
+        'userContactNumber' in data &&
+        'sessionStartTime' in data &&
+        'lastSaveTime' in data &&
+        'lastSavedMessageIndex' in data &&
+        Array.isArray((data as any).conversation) &&
+        (typeof (data as any).userContactNumber === 'string' || (data as any).userContactNumber === null) &&
+        typeof (data as any).sessionStartTime === 'string' &&
+        typeof (data as any).lastSaveTime === 'string' &&
+        typeof (data as any).lastSavedMessageIndex === 'number'
+    );
+}
+
 export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
     server = new McpServer({
         name: "MCP CRM Chat Assistant",
@@ -42,9 +60,9 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
     // Get session state from storage or create new one
     private async getSessionState(): Promise<SessionState> {
         const key = this.getSessionKey();
-        const stored = await this.state.storage.get<SessionState>(key);
+        const stored = await this.state.storage.get(key);
         
-        if (stored) {
+        if (stored && isSessionState(stored)) {
             return stored;
         }
         
