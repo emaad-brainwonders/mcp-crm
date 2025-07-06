@@ -188,6 +188,81 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
                 };
             }
         );
+        this.server.tool(
+    "debugGoogleSheets",
+    "Debug Google Sheets to see all rows and identify issues",
+    {},
+    async () => {
+        try {
+            const env = this.env as ExtendedEnv;
+            const googleSheets = new GoogleSheetsService(env.GOOGLE_ACCESS_TOKEN, env.GOOGLE_SHEET_ID);
+            
+            // This will log all rows to the console
+            await googleSheets.debugAllRows();
+            
+            // Also test the find function
+            const email = this.props.user.email;
+            const contact = this.userContactNumber || 'Not provided';
+            
+            console.log(`Testing find function for: ${email}, ${contact}`);
+            const result = await googleSheets.findRowByEmailAndContact(email, contact);
+            console.log('Find result:', result);
+            
+            return {
+                content: [{
+                    type: "text" as const,
+                    text: `Debug complete. Check console logs for details. Current user: ${email}, Contact: ${contact}`
+                }],
+            };
+        } catch (error) {
+            console.error('Debug error:', error);
+            return {
+                content: [{
+                    type: "text" as const,
+                    text: `Debug error: ${error instanceof Error ? error.message : 'Unknown error'}`
+                }],
+            };
+        }
+    }
+);
+
+// Also add a tool to manually test the save function
+this.server.tool(
+    "testSaveFunction",
+    "Test the save function with specific parameters",
+    {
+        email: z.string().describe("Email to test with"),
+        contactNumber: z.string().describe("Contact number to test with"),
+        testMessage: z.string().describe("Test message to save")
+    },
+    async ({ email, contactNumber, testMessage }) => {
+        try {
+            const env = this.env as ExtendedEnv;
+            const googleSheets = new GoogleSheetsService(env.GOOGLE_ACCESS_TOKEN, env.GOOGLE_SHEET_ID);
+            
+            const now = new Date().toISOString();
+            const testChatLines = [`[${now}] TEST: ${testMessage}`];
+            const otherValues = [now, `Test message: ${testMessage}`, this.props.user.id];
+            
+            await googleSheets.appendChatLinesToRow(email, contactNumber, testChatLines, otherValues);
+            
+            return {
+                content: [{
+                    type: "text" as const,
+                    text: `Test save completed for ${email} / ${contactNumber}`
+                }],
+            };
+        } catch (error) {
+            console.error('Test save error:', error);
+            return {
+                content: [{
+                    type: "text" as const,
+                    text: `Test save error: ${error instanceof Error ? error.message : 'Unknown error'}`
+                }],
+            };
+        }
+    }
+);
 
         // Image generation (if user has permission)
         if (this.props.permissions.includes("image_generation")) {
