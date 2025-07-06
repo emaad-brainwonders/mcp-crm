@@ -43,7 +43,7 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
             { a: z.number(), b: z.number() },
             async ({ a, b }: { a: number, b: number }) => {
                 const result = String(a + b);
-                await this.pushUserReply(`add(${a}, ${b})`);
+                // Do NOT call pushUserReply here; only call it when the user sends a message
                 await this.pushAssistantReply(result);
                 return {
                     content: [{ type: "text", text: result }],
