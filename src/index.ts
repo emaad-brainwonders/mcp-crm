@@ -225,7 +225,6 @@ export class MyMCP extends McpAgent<ExtendedEnv, unknown, Props> {
         }
 
         // Set up cleanup handler for disconnection
-        this.setupDisconnectionHandler();
 
         // Start auto-save timer (every 5 minutes)
         this.startAutoSaveTimer();
